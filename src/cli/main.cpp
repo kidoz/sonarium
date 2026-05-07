@@ -1,9 +1,12 @@
+#include <charconv>
 #include <cstdlib>
+#include <expected>
 #include <filesystem>
 #include <iostream>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "catalog/in_memory_repository.hpp"
 #include "catalog/postgres_repository.hpp"
@@ -12,6 +15,9 @@
 #include "cli/http_client.hpp"
 #include "core/version.hpp"
 #include "scanner/media_scanner.hpp"
+#include "transcode/ffmpeg_command.hpp"
+#include "transcode/ffmpeg_runner.hpp"
+#include "transcode/transcode_request.hpp"
 
 namespace {
 
@@ -23,7 +29,9 @@ void print_usage(std::string_view argv0) {
               << "                                  (uses SONARIUM_PG_CONNINFO)\n"
               << "  scan <path>                   — dry-run preview: walk <path> with an\n"
               << "                                  in-memory catalog, print the tree, no DB\n"
-              << "  transcode --track-id <id>     — TODO\n"
+              << "  transcode --track-id <id>     — re-encode a track via ffmpeg, write a new\n"
+              << "    [--codec mp3|aac]             rendition row (uses SONARIUM_PG_CONNINFO).\n"
+              << "    [--bitrate <kbps>]            Defaults: codec=mp3, bitrate=128.\n"
               << "  dlna status [--url URL]       — probe a running sonarium-dlna server\n"
               << "                                  (URL defaults to http://127.0.0.1:18200)\n";
 }
@@ -102,6 +110,158 @@ void print_scan_tree(sonarium::catalog::Repository const& repo) {
             }
         }
     }
+}
+
+struct TranscodeArgs {
+    std::string track_id;
+    sonarium::transcode::TargetCodec codec = sonarium::transcode::TargetCodec::mp3;
+    std::uint32_t bitrate_kbps = 128;
+};
+
+[[nodiscard]] std::expected<TranscodeArgs, std::string>
+parse_transcode_args(std::span<char*> args) {
+    TranscodeArgs out;
+    bool track_seen = false;
+    for (std::size_t i = 2; i < args.size(); ++i) {
+        std::string_view const a{args[i]};
+        if (a == "--track-id" && (i + 1) < args.size()) {
+            out.track_id = std::string{args[i + 1]};
+            track_seen = true;
+            ++i;
+        } else if (a == "--codec" && (i + 1) < args.size()) {
+            std::string_view const v{args[i + 1]};
+            if (v == "mp3") {
+                out.codec = sonarium::transcode::TargetCodec::mp3;
+            } else if (v == "aac") {
+                out.codec = sonarium::transcode::TargetCodec::aac_lc;
+            } else {
+                return std::unexpected(std::string{"unknown --codec '"} + std::string{v}
+                                       + "' (expected: mp3|aac)");
+            }
+            ++i;
+        } else if (a == "--bitrate" && (i + 1) < args.size()) {
+            std::string_view const v{args[i + 1]};
+            std::uint32_t kbps = 0;
+            auto const* first = v.data();
+            auto const* last = v.data() + v.size();
+            auto const r = std::from_chars(first, last, kbps);
+            if (r.ec != std::errc{} || kbps == 0) {
+                return std::unexpected(std::string{"invalid --bitrate '"} + std::string{v} + "'");
+            }
+            out.bitrate_kbps = kbps;
+            ++i;
+        } else {
+            return std::unexpected(std::string{"unknown arg '"} + std::string{a} + "'");
+        }
+    }
+    if (!track_seen) {
+        return std::unexpected("missing --track-id");
+    }
+    return out;
+}
+
+int cmd_transcode(std::span<char*> args) {
+    auto parsed = parse_transcode_args(args);
+    if (!parsed.has_value()) {
+        std::cerr << "sonariumctl transcode: " << parsed.error() << '\n';
+        return 2;
+    }
+
+    auto const conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    if (conninfo.empty()) {
+        std::cerr << "sonariumctl transcode: SONARIUM_PG_CONNINFO must be set\n";
+        return 2;
+    }
+    auto repo_result = sonarium::catalog::PostgresRepository::open(conninfo);
+    if (!repo_result.has_value()) {
+        std::cerr << "sonariumctl transcode: postgres open failed: " << repo_result.error() << '\n';
+        return 3;
+    }
+    auto& repo = *repo_result;
+
+    auto const track = repo->get_track(parsed->track_id);
+    if (!track.has_value()) {
+        std::cerr << "sonariumctl transcode: track '" << parsed->track_id << "' not found\n";
+        return 3;
+    }
+    auto const sources = repo->list_renditions_for_track(parsed->track_id);
+    if (sources.empty()) {
+        std::cerr << "sonariumctl transcode: track has no source rendition\n";
+        return 3;
+    }
+    auto const& source = sources.front();
+
+    sonarium::transcode::TranscodeRequest req;
+    req.input_path = source.storage_path;
+    req.output_path = sonarium::transcode::output_path_for(source.storage_path, parsed->codec);
+    req.codec = parsed->codec;
+    req.bitrate_kbps = parsed->bitrate_kbps;
+
+    if (req.input_path == req.output_path) {
+        std::cerr << "sonariumctl transcode: refusing to transcode in place ('" << req.input_path
+                  << "')\n";
+        return 3;
+    }
+
+    std::cout << "sonariumctl transcode: " << req.input_path << " -> " << req.output_path
+              << " (codec=" << sonarium::transcode::extension_for(parsed->codec)
+              << " bitrate=" << parsed->bitrate_kbps << "k)\n";
+
+    auto run = sonarium::transcode::run_ffmpeg(req);
+    if (!run.has_value()) {
+        std::cerr << "sonariumctl transcode: " << run.error() << '\n';
+        return 3;
+    }
+    if (run->exit_code != 0) {
+        std::cerr << "sonariumctl transcode: ffmpeg exited " << run->exit_code << "\n"
+                  << run->stderr_excerpt;
+        return 3;
+    }
+
+    std::error_code ec;
+    auto const size = std::filesystem::file_size(req.output_path, ec);
+    if (ec) {
+        std::cerr << "sonariumctl transcode: stat output: " << ec.message() << '\n';
+        return 3;
+    }
+
+    std::string const ext{sonarium::transcode::extension_for(parsed->codec)};
+    sonarium::media::RenditionMime const rm{
+        sonarium::transcode::to_audio_codec(parsed->codec),
+        sonarium::transcode::to_audio_container(parsed->codec),
+    };
+    std::string const mime{sonarium::media::default_mime_for(rm)};
+
+    sonarium::media::MediaRendition out{};
+    out.id = parsed->track_id + ":" + ext + ":" + std::to_string(parsed->bitrate_kbps);
+    out.track_id = parsed->track_id;
+    out.codec = rm.codec;
+    out.container = rm.container;
+    out.mime_type = mime;
+    out.bitrate_bps = parsed->bitrate_kbps * 1000;
+    out.sample_rate_hz = source.sample_rate_hz;
+    out.bit_depth = source.bit_depth;
+    out.channels = source.channels;
+    out.duration_ms = source.duration_ms;
+    out.size_bytes = size;
+    out.storage_path = req.output_path;
+    out.protocol_info = std::string{"http-get:*:"} + mime + ":*";
+    if (auto pn = sonarium::media::dlna_org_pn_for(rm); pn.has_value()) {
+        out.dlna_profile_name = std::string{*pn};
+    }
+    out.purpose = sonarium::media::RenditionPurpose::dlna_lossy;
+
+    if (auto u = repo->upsert_rendition(out); !u.has_value()) {
+        std::cerr << "sonariumctl transcode: upsert_rendition failed: " << u.error() << '\n';
+        return 3;
+    }
+    if (auto b = repo->bump_system_update_id(); !b.has_value()) {
+        std::cerr << "sonariumctl transcode: bump_system_update_id failed: " << b.error() << '\n';
+        return 3;
+    }
+
+    std::cout << "  rendition_id=" << out.id << " size=" << size << " bytes\n";
+    return 0;
 }
 
 int cmd_dlna_status(std::string_view base_url) {
@@ -232,6 +392,9 @@ int main(int argc, char** argv) {
             return 2;
         }
         return cmd_scan(std::string_view{args[2]});
+    }
+    if (cmd == "transcode") {
+        return cmd_transcode(args);
     }
     if (cmd == "dlna" && args.size() >= 3 && std::string_view{args[2]} == "status") {
         std::string url = "http://127.0.0.1:18200";

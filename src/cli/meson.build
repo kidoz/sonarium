@@ -23,6 +23,7 @@ executable(
         sonarium_module_deps['core'],
         sonarium_module_deps['catalog'],
         sonarium_module_deps['scanner'],
+        sonarium_module_deps['transcode'],
         cli_lib_dep,
     ],
     cpp_args : sonarium_common_args,
