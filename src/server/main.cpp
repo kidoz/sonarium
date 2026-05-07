@@ -13,6 +13,7 @@
 #include "catalog/in_memory_repository.hpp"
 #include "catalog/postgres_repository.hpp"
 #include "catalog/repository.hpp"
+#include "core/media_token.hpp"
 #include "core/version.hpp"
 #include "hls/playlist_builder.hpp"
 #include "media/media_rendition.hpp"
@@ -109,6 +110,7 @@ try_open_postgres_catalog(std::string_view conninfo) {
 
 void register_hls_routes(::atria::Application& app,
                          std::shared_ptr<sonarium::catalog::Repository const> catalog,
+                         std::shared_ptr<sonarium::core::MediaTokenSigner const> signer,
                          std::string media_base_url,
                          std::string self_base_url) {
     // GET /version — basic liveness/identity probe.
@@ -121,33 +123,35 @@ void register_hls_routes(::atria::Application& app,
     });
 
     // GET /hls/tracks/{id}/master.m3u8 — multi-variant master playlist.
-    app.get("/hls/tracks/{id}/master.m3u8",
-            [catalog, self_base_url, media_base_url](::atria::Request& req) -> ::atria::Response {
-                auto const id = req.path_param("id").value_or("");
-                if (id.empty()) {
-                    return not_found();
-                }
-                auto const track = catalog->get_track(id);
-                if (!track.has_value()) {
-                    return not_found();
-                }
-                auto const renditions = catalog->list_renditions_for_track(id);
-                if (renditions.empty()) {
-                    return not_found();
-                }
-                std::vector<sonarium::hls::MediaVariant> variants;
-                variants.reserve(renditions.size());
-                for (auto const& r : renditions) {
-                    auto media_url = media_base_url + "/media/renditions/" + r.id;
-                    variants.push_back(
-                        sonarium::hls::variant_from_rendition(r, std::move(media_url)));
-                }
-                return m3u8_ok(sonarium::hls::build_master_playlist(variants, self_base_url));
-            });
+    app.get(
+        "/hls/tracks/{id}/master.m3u8",
+        [catalog, signer, self_base_url, media_base_url](
+            ::atria::Request& req) -> ::atria::Response {
+            auto const id = req.path_param("id").value_or("");
+            if (id.empty()) {
+                return not_found();
+            }
+            auto const track = catalog->get_track(id);
+            if (!track.has_value()) {
+                return not_found();
+            }
+            auto const renditions = catalog->list_renditions_for_track(id);
+            if (renditions.empty()) {
+                return not_found();
+            }
+            std::vector<sonarium::hls::MediaVariant> variants;
+            variants.reserve(renditions.size());
+            for (auto const& r : renditions) {
+                // signer.sign() returns "" when disabled, so unconditional append is safe.
+                auto media_url = media_base_url + "/media/renditions/" + r.id + signer->sign(r.id);
+                variants.push_back(sonarium::hls::variant_from_rendition(r, std::move(media_url)));
+            }
+            return m3u8_ok(sonarium::hls::build_master_playlist(variants, self_base_url));
+        });
 
     // GET /hls/renditions/{id}/index.m3u8 — single-variant VOD media playlist.
     app.get("/hls/renditions/{id}/index.m3u8",
-            [catalog, media_base_url](::atria::Request& req) -> ::atria::Response {
+            [catalog, signer, media_base_url](::atria::Request& req) -> ::atria::Response {
                 auto const id = req.path_param("id").value_or("");
                 if (id.empty()) {
                     return not_found();
@@ -156,7 +160,8 @@ void register_hls_routes(::atria::Application& app,
                 if (!rendition.has_value()) {
                     return not_found();
                 }
-                auto media_url = media_base_url + "/media/renditions/" + rendition->id;
+                auto media_url = media_base_url + "/media/renditions/" + rendition->id
+                                 + signer->sign(rendition->id);
                 auto const variant =
                     sonarium::hls::variant_from_rendition(*rendition, std::move(media_url));
                 return m3u8_ok(sonarium::hls::build_media_playlist(variant));
@@ -177,6 +182,17 @@ int main() {
                std::string{"http://"} + (bind_host == "0.0.0.0" ? "127.0.0.1" : bind_host) + ":"
                    + std::to_string(http_port));
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const token_secret = env_or("SONARIUM_MEDIA_TOKEN_SECRET", "");
+    auto const token_ttl_seconds = [&]() -> std::int64_t {
+        auto const* v = std::getenv("SONARIUM_MEDIA_TOKEN_TTL_SECONDS");
+        if (v == nullptr) {
+            return 3600;
+        }
+        auto const parsed = std::strtol(v, nullptr, 10);
+        return (parsed > 0) ? parsed : 3600;
+    }();
+    auto signer = std::make_shared<sonarium::core::MediaTokenSigner>(
+        token_secret, std::chrono::seconds{token_ttl_seconds});
 
     std::shared_ptr<sonarium::catalog::Repository> catalog;
     std::string catalog_kind;
@@ -197,13 +213,19 @@ int main() {
               << "  http_port=" << http_port << '\n'
               << "  self_base=" << self_base << '\n'
               << "  media_base=" << media_base << '\n'
-              << "  catalog=" << catalog_kind << '\n';
+              << "  catalog=" << catalog_kind << '\n'
+              << "  media_tokens=" << (signer->enabled() ? "enabled" : "disabled");
+    if (signer->enabled()) {
+        std::cout << " ttl=" << token_ttl_seconds << "s";
+    }
+    std::cout << '\n';
 
     ::atria::Application app;
     app.use(::atria::middleware::error_handler());
     app.use(::atria::middleware::request_logger());
     register_hls_routes(app,
                         std::const_pointer_cast<sonarium::catalog::Repository const>(catalog),
+                        std::const_pointer_cast<sonarium::core::MediaTokenSigner const>(signer),
                         media_base,
                         self_base);
 
