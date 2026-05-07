@@ -18,18 +18,18 @@ namespace sonarium::catalog {
 // deployments should swap in `asterorm::session<connection_pool<pg::driver>>`
 // once concurrent access matters.
 //
-// Status: only `system_update_id`, `list_artists`, and `get_artist` are wired
-// to real SQL. Every other method is a TODO that returns an empty page /
-// nullopt. This proves the AsterORM integration path is viable; remaining
-// methods are mechanical follow-ups that mirror the `list_artists` shape.
+// Implements both `Repository` (read) and `CatalogWriter` (write). Every
+// listing query is paginated (`LIMIT $n OFFSET $m` with a fallback page size
+// when `requested_count == 0`) and pairs with a `COUNT(*)` for `total_matches`
+// so DLNA `Browse` can report it back to the renderer.
+//
+// The write side issues `INSERT ... ON CONFLICT (id) DO UPDATE` so the worker
+// can run the same scan repeatedly without rewriting unchanged rows; columns
+// like `created_at` are preserved while `updated_at = NOW()` advances.
 //
 // Thread-safety: all calls take an internal mutex around the libpq connection
 // (libpq connections are not thread-safe). Replace with the asterorm session +
 // pool when concurrency is needed.
-//
-// Implements both `Repository` (read) and `CatalogWriter` (write). The write
-// side issues `INSERT ... ON CONFLICT (id) DO UPDATE` so the worker can run
-// the same scan repeatedly without rewriting unchanged rows.
 class PostgresRepository final : public Repository, public CatalogWriter {
 public:
     explicit PostgresRepository(std::shared_ptr<::asterorm::pg::connection> conn) noexcept;

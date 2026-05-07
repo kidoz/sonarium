@@ -5,7 +5,9 @@
 #include <string>
 #include <string_view>
 
+#include "catalog/in_memory_repository.hpp"
 #include "catalog/postgres_repository.hpp"
+#include "catalog/repository.hpp"
 #include "core/version.hpp"
 #include "scanner/media_scanner.hpp"
 
@@ -17,7 +19,8 @@ void print_usage(std::string_view argv0) {
               << "  version                       — print sonariumctl version\n"
               << "  import <path>                 — scan <path> into the postgres catalog\n"
               << "                                  (uses SONARIUM_PG_CONNINFO)\n"
-              << "  scan                          — TODO\n"
+              << "  scan <path>                   — dry-run preview: walk <path> with an\n"
+              << "                                  in-memory catalog, print the tree, no DB\n"
               << "  transcode --track-id <id>     — TODO\n"
               << "  dlna status                   — TODO\n";
 }
@@ -64,6 +67,67 @@ int cmd_import(std::string_view path) {
     return 0;
 }
 
+void print_scan_tree(sonarium::catalog::Repository const& repo) {
+    constexpr sonarium::catalog::PageRequest unbounded{0, 0};
+    auto const artists = repo.list_artists(unbounded);
+    for (auto const& artist : artists.rows) {
+        std::cout << artist.name << "\n";
+        auto const albums = repo.list_albums_for_artist(artist.id, unbounded);
+        for (auto const& album : albums.rows) {
+            std::cout << "  " << album.title;
+            if (album.release_year.has_value()) {
+                std::cout << " (" << *album.release_year << ')';
+            }
+            if (album.cover_art_asset_id.has_value()) {
+                std::cout << " [cover]";
+            }
+            std::cout << '\n';
+            auto const tracks = repo.list_tracks_for_album(album.id, unbounded);
+            for (auto const& track : tracks.rows) {
+                std::cout << "    ";
+                if (track.track_number.has_value()) {
+                    std::cout << *track.track_number << ". ";
+                }
+                std::cout << track.title;
+                if (track.duration_ms != 0) {
+                    auto const seconds = track.duration_ms / 1000;
+                    std::cout << "  [" << (seconds / 60) << ':';
+                    auto const rem = seconds % 60;
+                    std::cout << (rem < 10 ? "0" : "") << rem << ']';
+                }
+                std::cout << '\n';
+            }
+        }
+    }
+}
+
+int cmd_scan(std::string_view path) {
+    sonarium::catalog::InMemoryRepository repo;
+
+    std::cout << "sonariumctl scan: walking " << path << " (dry-run, no DB writes)\n";
+    auto const report = sonarium::scanner::scan(std::filesystem::path{std::string{path}}, repo);
+
+    if (!report.errors.empty()) {
+        std::cerr << "errors (" << report.errors.size() << "):\n";
+        for (auto const& e : report.errors) {
+            std::cerr << "  - " << e << '\n';
+        }
+    }
+
+    if (report.tracks_upserted > 0) {
+        std::cout << "\n";
+        print_scan_tree(repo);
+    }
+
+    std::cout << "\nsummary: artists=" << report.artists_upserted
+              << " albums=" << report.albums_upserted << " tracks=" << report.tracks_upserted
+              << " renditions=" << report.renditions_upserted
+              << " covers=" << report.covers_upserted << " skipped=" << report.skipped_files
+              << '\n';
+
+    return report.errors.empty() ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -88,6 +152,13 @@ int main(int argc, char** argv) {
             return 2;
         }
         return cmd_import(std::string_view{args[2]});
+    }
+    if (cmd == "scan") {
+        if (args.size() < 3) {
+            std::cerr << "sonariumctl scan: missing <path>\n";
+            return 2;
+        }
+        return cmd_scan(std::string_view{args[2]});
     }
 
     std::cerr << "sonariumctl: command '" << cmd << "' not yet implemented\n";
