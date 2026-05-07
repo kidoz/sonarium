@@ -6,6 +6,7 @@ subdir('scanner')
 subdir('dlna-core')
 subdir('upnp')
 subdir('transcode')
+subdir('hls')
 subdir('composition')
 
 subdir('server')

@@ -6,6 +6,7 @@ subdir('dlna-core')
 subdir('upnp')
 subdir('composition')
 subdir('transcode')
+subdir('hls')
 subdir('cli')
 
 # Top-level smoke test: confirms Catch2 wiring works without any sonarium dep.

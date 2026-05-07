@@ -59,7 +59,8 @@ distclean: clean
 test: build
     meson test -C {{build_dir}} \
         --suite=core --suite=media --suite=catalog --suite=scanner --suite=dlna-core \
-        --suite=upnp --suite=composition --suite=transcode --suite=cli --suite=smoke
+        --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=cli \
+        --suite=smoke
 
 # Run a single suite — e.g. `just test-suite composition`.
 test-suite suite: build
@@ -106,6 +107,10 @@ run port=default_port: build
 # Print description.xml + a sample Browse(0) without opening a socket.
 run-offline: build
     ./{{build_dir}}/src/dlna/sonarium-dlna --offline
+
+# Run the HLS server (default port 18201). Set SONARIUM_MEDIA_BASE_URL to point at sonarium-dlna.
+run-server port="18201": build
+    SONARIUM_SERVER_HTTP_PORT={{port}} ./{{build_dir}}/src/server/sonarium-server
 
 # Run the admin CLI — e.g. `just ctl version`, `just ctl import ./music`.
 ctl *args: build
