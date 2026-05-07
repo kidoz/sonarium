@@ -4,8 +4,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -16,6 +19,7 @@
 #include "core/media_token.hpp"
 #include "core/version.hpp"
 #include "hls/playlist_builder.hpp"
+#include "hls/segmenter.hpp"
 #include "media/media_rendition.hpp"
 
 namespace {
@@ -42,6 +46,26 @@ constexpr std::string_view default_media_base = "http://127.0.0.1:18200";
     return static_cast<std::uint16_t>(parsed);
 }
 
+// Generate a 15-second sine-wave mp3 if it isn't already on disk. Lets the
+// demo catalog produce something the segmenter can actually slice when the
+// server runs without Postgres + a real media library.
+[[nodiscard]] std::filesystem::path ensure_demo_audio() {
+    auto const path = std::filesystem::temp_directory_path() / "sonarium-demo-audio.mp3";
+    std::error_code ec;
+    if (std::filesystem::exists(path, ec) && std::filesystem::file_size(path, ec) > 0) {
+        return path;
+    }
+    auto const cmd = std::string{"ffmpeg -y -loglevel error -f lavfi -i "}
+                     + R"("sine=frequency=440:duration=15")" + " -ar 44100 -ac 2 " + path.string()
+                     + " >/dev/null 2>&1";
+    if (std::system(cmd.c_str()) != 0) {
+        // Best-effort: leave the path empty so the segmenter falls back to
+        // the single-segment playlist that points at /media/renditions/{id}.
+        return {};
+    }
+    return path;
+}
+
 // Repository selection mirrors sonarium-dlna: prefer Postgres when
 // SONARIUM_PG_CONNINFO is set, otherwise fall back to a tiny sample so the
 // server stays demoable without a database.
@@ -61,12 +85,14 @@ constexpr std::string_view default_media_base = "http://127.0.0.1:18200";
     al.title = "Demo Album";
     repo->add_album(al);
 
+    auto const demo_audio = ensure_demo_audio();
+
     Track t;
     t.id = "1";
     t.album_id = "1";
     t.artist_id = "1";
     t.title = "Hello Track";
-    t.duration_ms = 240'000;
+    t.duration_ms = 15'000;
     repo->add_track(t);
 
     MediaRendition r;
@@ -75,8 +101,9 @@ constexpr std::string_view default_media_base = "http://127.0.0.1:18200";
     r.codec = AudioCodec::mp3;
     r.container = AudioContainer::mp3;
     r.mime_type = "audio/mpeg";
-    r.bitrate_bps = 320'000;
-    r.duration_ms = 240'000;
+    r.bitrate_bps = 192'000;
+    r.duration_ms = 15'000;
+    r.storage_path = demo_audio.string();
     repo->add_rendition(r);
 
     return repo;
@@ -108,9 +135,20 @@ try_open_postgres_catalog(std::string_view conninfo) {
     return r;
 }
 
+[[nodiscard]] std::optional<std::string> read_file(std::filesystem::path const& path) {
+    std::ifstream in{path, std::ios::binary};
+    if (!in) {
+        return std::nullopt;
+    }
+    std::ostringstream buf;
+    buf << in.rdbuf();
+    return buf.str();
+}
+
 void register_hls_routes(::atria::Application& app,
                          std::shared_ptr<sonarium::catalog::Repository const> catalog,
                          std::shared_ptr<sonarium::core::MediaTokenSigner const> signer,
+                         std::shared_ptr<sonarium::hls::Segmenter> segmenter,
                          std::string media_base_url,
                          std::string self_base_url) {
     // GET /version — basic liveness/identity probe.
@@ -149,23 +187,66 @@ void register_hls_routes(::atria::Application& app,
             return m3u8_ok(sonarium::hls::build_master_playlist(variants, self_base_url));
         });
 
-    // GET /hls/renditions/{id}/index.m3u8 — single-variant VOD media playlist.
-    app.get("/hls/renditions/{id}/index.m3u8",
-            [catalog, signer, media_base_url](::atria::Request& req) -> ::atria::Response {
-                auto const id = req.path_param("id").value_or("");
-                if (id.empty()) {
-                    return not_found();
-                }
-                auto rendition = catalog->get_rendition(id);
-                if (!rendition.has_value()) {
-                    return not_found();
-                }
+    // GET /hls/renditions/{id}/index.m3u8 — segmented VOD playlist. First
+    // request to a rendition triggers ffmpeg to write seg00000.ts ... beside
+    // index.m3u8 in the cache dir; subsequent requests fast-return the cached
+    // playlist. When `rendition.storage_path` is empty / missing (e.g. the
+    // demo catalog without seeded files) we fall back to the single-segment
+    // playlist that points at the existing /media/renditions/{id} route.
+    app.get(
+        "/hls/renditions/{id}/index.m3u8",
+        [catalog, signer, segmenter, media_base_url](::atria::Request& req) -> ::atria::Response {
+            auto const id = req.path_param("id").value_or("");
+            if (id.empty()) {
+                return not_found();
+            }
+            auto rendition = catalog->get_rendition(id);
+            if (!rendition.has_value()) {
+                return not_found();
+            }
+
+            // No on-disk source → fall back to single-segment playlist.
+            std::error_code ec;
+            if (rendition->storage_path.empty()
+                || !std::filesystem::exists(rendition->storage_path, ec)) {
                 auto media_url = media_base_url + "/media/renditions/" + rendition->id
                                  + signer->sign(rendition->id);
                 auto const variant =
                     sonarium::hls::variant_from_rendition(*rendition, std::move(media_url));
                 return m3u8_ok(sonarium::hls::build_media_playlist(variant));
-            });
+            }
+
+            auto playlist_path =
+                segmenter->ensure_segments(std::string{id}, rendition->storage_path);
+            if (!playlist_path.has_value()) {
+                ::atria::Response r{::atria::Status::InternalServerError};
+                r.set_body("segmenter: " + playlist_path.error() + "\n");
+                return r;
+            }
+            auto body = read_file(*playlist_path);
+            if (!body.has_value()) {
+                return not_found();
+            }
+            return m3u8_ok(std::move(*body));
+        });
+
+    // GET /hls/renditions/{id}/{seg} — serve a cached .ts segment. Filename
+    // is validated against `seg\d{5}\.ts`; nothing else is allowed.
+    app.get("/hls/renditions/{id}/{seg}", [segmenter](::atria::Request& req) -> ::atria::Response {
+        auto const id = req.path_param("id").value_or("");
+        auto const seg = req.path_param("seg").value_or("");
+        if (id.empty() || seg.empty()) {
+            return not_found();
+        }
+        auto path = segmenter->cached_file(std::string{id}, seg);
+        if (!path.has_value()) {
+            return not_found();
+        }
+        ::atria::FileResponseOptions opts;
+        opts.content_type = "video/mp2t";
+        opts.allow_range = true;
+        return ::atria::Response::file(req, *path, std::move(opts));
+    });
 }
 
 } // namespace
@@ -182,6 +263,19 @@ int main() {
                std::string{"http://"} + (bind_host == "0.0.0.0" ? "127.0.0.1" : bind_host) + ":"
                    + std::to_string(http_port));
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const segment_cache_root =
+        env_or("SONARIUM_HLS_CACHE_DIR",
+               (std::filesystem::temp_directory_path() / "sonarium-hls").string());
+    auto const segment_seconds_env = std::getenv("SONARIUM_HLS_SEGMENT_SECONDS");
+    auto const segment_seconds = static_cast<std::uint32_t>(
+        (segment_seconds_env != nullptr && std::atoi(segment_seconds_env) > 0)
+            ? std::atoi(segment_seconds_env)
+            : 6);
+    auto segmenter = std::make_shared<sonarium::hls::Segmenter>(sonarium::hls::SegmenterConfig{
+        .cache_root = std::filesystem::path{segment_cache_root},
+        .segment_duration_seconds = segment_seconds,
+        .bitrate_kbps = 192,
+    });
     auto const token_secret = env_or("SONARIUM_MEDIA_TOKEN_SECRET", "");
     auto const token_ttl_seconds = [&]() -> std::int64_t {
         auto const* v = std::getenv("SONARIUM_MEDIA_TOKEN_TTL_SECONDS");
@@ -214,6 +308,7 @@ int main() {
               << "  self_base=" << self_base << '\n'
               << "  media_base=" << media_base << '\n'
               << "  catalog=" << catalog_kind << '\n'
+              << "  hls_cache=" << segment_cache_root << " (segments=" << segment_seconds << "s)\n"
               << "  media_tokens=" << (signer->enabled() ? "enabled" : "disabled");
     if (signer->enabled()) {
         std::cout << " ttl=" << token_ttl_seconds << "s";
@@ -226,6 +321,7 @@ int main() {
     register_hls_routes(app,
                         std::const_pointer_cast<sonarium::catalog::Repository const>(catalog),
                         std::const_pointer_cast<sonarium::core::MediaTokenSigner const>(signer),
+                        segmenter,
                         media_base,
                         self_base);
 

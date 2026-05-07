@@ -2,6 +2,7 @@ hls_lib = static_library(
     'hls',
     files(
         'playlist_builder.cpp',
+        'segmenter.cpp',
     ),
     include_directories : sonarium_inc,
     cpp_args : sonarium_common_args,
@@ -24,4 +25,6 @@ sonarium_module_deps += {'hls': hls_dep}
 sonarium_lint_sources += files(
     'playlist_builder.hpp',
     'playlist_builder.cpp',
+    'segmenter.hpp',
+    'segmenter.cpp',
 )
