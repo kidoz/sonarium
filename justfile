@@ -173,6 +173,76 @@ smoke port=default_port: build
 smoke-log:
     @tail -50 /tmp/sonarium-dlna-smoke.log 2>/dev/null || echo "no smoke log yet — run \`just smoke\` first"
 
+# End-to-end smoke for the CLI + servers: spin up Postgres, import a fixture,
+# transcode a track, probe `dlna status`, and curl the HLS playlists. Requires
+# Docker + ffmpeg on PATH. Tears down servers on exit.
+smoke-cli: build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    DLNA_PORT=18290
+    HLS_PORT=18291
+    FIXTURE=$(mktemp -d -t sonarium-smoke-cli-XXXXXX)
+    trap 'pkill -TERM -f sonarium-dlna 2>/dev/null || true; pkill -TERM -f sonarium-server 2>/dev/null || true; rm -rf "$FIXTURE"' EXIT
+
+    echo "[smoke-cli] building fixture audio library at $FIXTURE"
+    mkdir -p "$FIXTURE/Sample Artist/Demo Album"
+    ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=440:duration=15" -ar 44100 -ac 2 \
+        -metadata artist="Sample Artist" -metadata album="Demo Album" -metadata title="Hello Track" \
+        "$FIXTURE/Sample Artist/Demo Album/01 - Hello Track.mp3"
+
+    echo "[smoke-cli] starting Postgres (just pg-up)"
+    just pg-up
+
+    PG_DSN="{{pg_conninfo}}"
+    export SONARIUM_PG_CONNINFO="$PG_DSN"
+
+    # Wipe any prior catalog state so this run is reproducible.
+    docker compose exec -T postgres psql -U sonarium -d sonarium -c \
+        "TRUNCATE artist, album, track, media_rendition, storage_asset, playlist, playlist_item, system_state RESTART IDENTITY CASCADE" \
+        >/dev/null 2>&1 || true
+
+    echo "[smoke-cli] sonariumctl import"
+    ./{{build_dir}}/src/cli/sonariumctl import "$FIXTURE"
+
+    echo "[smoke-cli] sonariumctl scan (dry-run preview)"
+    ./{{build_dir}}/src/cli/sonariumctl scan "$FIXTURE"
+
+    TRACK_ID="sample-artist:demo-album:01-hello-track"
+    echo "[smoke-cli] sonariumctl transcode --track-id $TRACK_ID --codec aac --bitrate 96"
+    ./{{build_dir}}/src/cli/sonariumctl transcode --track-id "$TRACK_ID" --codec aac --bitrate 96
+
+    echo "[smoke-cli] starting sonarium-dlna on :$DLNA_PORT"
+    SONARIUM_DLNA_HTTP_PORT=$DLNA_PORT SONARIUM_DLNA_DISABLE_SSDP=1 \
+        ./{{build_dir}}/src/dlna/sonarium-dlna > /tmp/sonarium-smoke-cli-dlna.log 2>&1 &
+    for i in $(seq 1 20); do
+        if curl -sf -o /dev/null --max-time 1 http://127.0.0.1:$DLNA_PORT/description.xml; then break; fi
+        sleep 0.2
+    done
+
+    echo "[smoke-cli] sonariumctl dlna status --url http://127.0.0.1:$DLNA_PORT"
+    ./{{build_dir}}/src/cli/sonariumctl dlna status --url "http://127.0.0.1:$DLNA_PORT"
+
+    echo "[smoke-cli] starting sonarium-server on :$HLS_PORT"
+    SONARIUM_SERVER_HTTP_PORT=$HLS_PORT \
+    SONARIUM_MEDIA_BASE_URL="http://127.0.0.1:$DLNA_PORT" \
+        ./{{build_dir}}/src/server/sonarium-server > /tmp/sonarium-smoke-cli-server.log 2>&1 &
+    for i in $(seq 1 20); do
+        if curl -sf -o /dev/null --max-time 1 http://127.0.0.1:$HLS_PORT/version; then break; fi
+        sleep 0.2
+    done
+
+    echo "[smoke-cli] GET /hls/tracks/$TRACK_ID/master.m3u8"
+    curl -sf "http://127.0.0.1:$HLS_PORT/hls/tracks/$TRACK_ID/master.m3u8"
+
+    RENDITION_ID="$TRACK_ID:mp3"
+    echo "[smoke-cli] GET /hls/renditions/$RENDITION_ID/index.m3u8 (triggers segmenting)"
+    curl -sf "http://127.0.0.1:$HLS_PORT/hls/renditions/$RENDITION_ID/index.m3u8" | head -20
+
+    echo "[smoke-cli] HEAD /hls/renditions/$RENDITION_ID/seg00000.ts"
+    curl -sI "http://127.0.0.1:$HLS_PORT/hls/renditions/$RENDITION_ID/seg00000.ts" | head -5
+
+    echo "[smoke-cli] ✓ all probes ok"
+
 # ---------------------------------------------------------------------------
 # Postgres (catalog backend) — docker-compose driven.
 # ---------------------------------------------------------------------------
