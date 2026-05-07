@@ -1,0 +1,31 @@
+# Local Postgres for Sonarium catalog integration tests.
+#
+#   just pg-up                   # start postgres on 127.0.0.1:5432
+#   just test-pg                 # run live tests against it
+#   just pg-down                 # stop + remove the container
+#
+# The DSN sonarium uses (matches `just test-pg`):
+#   host=127.0.0.1 port=5432 user=sonarium password=sonarium dbname=sonarium
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sonarium-pg
+    environment:
+      POSTGRES_USER: sonarium
+      POSTGRES_PASSWORD: sonarium
+      POSTGRES_DB: sonarium
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - sonarium-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonarium -d sonarium"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  sonarium-pg-data:
+    name: sonarium-pg-data
