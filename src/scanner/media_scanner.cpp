@@ -14,6 +14,7 @@
 #include "catalog/track.hpp"
 #include "media/media_rendition.hpp"
 #include "media/mime_type.hpp"
+#include "scanner/audio_metadata.hpp"
 #include "scanner/path_layout.hpp"
 
 namespace sonarium::scanner {
@@ -232,6 +233,15 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
             }
         }
 
+        // ffprobe pulls duration / bitrate / sample-rate / channel info out of
+        // the file. On failure (binary missing, unrecognised file, fake bytes)
+        // we fall back to zeros — the catalog stays usable, just without
+        // accurate playback metadata.
+        AudioMetadata audio{};
+        if (auto md = read_audio_metadata(path); md.has_value()) {
+            audio = *md;
+        }
+
         Track track;
         track.id = track_id;
         track.album_id = album_id;
@@ -239,6 +249,7 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
         track.title = parsed->track_title;
         track.sort_title = track_slug;
         track.track_number = parsed->track_number;
+        track.duration_ms = audio.duration_ms;
         if (auto r = writer.upsert_track(track); r.has_value()) {
             ++report.tracks_upserted;
         } else {
@@ -257,6 +268,11 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
         rendition.codec = ext_info->codec;
         rendition.container = ext_info->container;
         rendition.mime_type = std::string{mime};
+        rendition.bitrate_bps = audio.bitrate_bps;
+        rendition.sample_rate_hz = audio.sample_rate_hz;
+        rendition.bit_depth = audio.bit_depth;
+        rendition.channels = audio.channels;
+        rendition.duration_ms = audio.duration_ms;
         rendition.size_bytes = file_size_or_zero(path);
         rendition.storage_path = path.string();
         rendition.dlna_profile_name = dlna_pn.has_value() ? std::string{*dlna_pn} : std::string{};

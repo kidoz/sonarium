@@ -2,6 +2,7 @@ scanner_lib = static_library(
     'scanner',
     files(
         'path_layout.cpp',
+        'audio_metadata.cpp',
         'media_scanner.cpp',
     ),
     include_directories : sonarium_inc,
@@ -27,6 +28,8 @@ sonarium_module_deps += {'scanner': scanner_dep}
 sonarium_lint_sources += files(
     'path_layout.hpp',
     'path_layout.cpp',
+    'audio_metadata.hpp',
+    'audio_metadata.cpp',
     'media_scanner.hpp',
     'media_scanner.cpp',
 )

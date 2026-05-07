@@ -2,6 +2,7 @@ scanner_tests = executable(
     'scanner-tests',
     files(
         'path_layout_tests.cpp',
+        'audio_metadata_tests.cpp',
         'media_scanner_tests.cpp',
     ),
     dependencies : [
@@ -21,5 +22,6 @@ test(
 
 sonarium_lint_sources += files(
     'path_layout_tests.cpp',
+    'audio_metadata_tests.cpp',
     'media_scanner_tests.cpp',
 )
