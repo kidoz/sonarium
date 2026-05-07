@@ -1,0 +1,10 @@
+[wrap-git]
+url = https://github.com/kidoz/atria.git
+revision = ef7173d728c05df3933cc3043217fd75f3717cd4
+depth = 1
+
+[wrap-default-options]
+werror = false
+
+[provide]
+atria = atria_dep

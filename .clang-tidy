@@ -1,0 +1,73 @@
+---
+# Sonarium clang-tidy configuration.
+#
+# Goals:
+#   - C++23 modernization and safety
+#   - bug detection (bugprone, cert)
+#   - core guideline coverage without forcing wholesale rewrites
+#   - performance and readability hygiene
+#
+# Specific rules with high noise on a media/server codebase are disabled.
+
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  hicpp-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-throwing-static-initialization,
+  -cert-err58-cpp,
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
+  -cppcoreguidelines-owning-memory,
+  -hicpp-no-array-decay,
+  -hicpp-vararg,
+  -hicpp-signed-bitwise,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
+  -portability-avoid-pragma-once,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -readability-named-parameter
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|tests|examples)/.*\.(h|hpp)$'
+FormatStyle: file
+
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,               value: CamelCase }
+  - { key: readability-identifier-naming.StructCase,              value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase,                value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantCase,        value: lower_case }
+  - { key: readability-identifier-naming.FunctionCase,            value: lower_case }
+  - { key: readability-identifier-naming.MethodCase,              value: lower_case }
+  - { key: readability-identifier-naming.VariableCase,            value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase,           value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,     value: _ }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,   value: _ }
+  - { key: readability-identifier-naming.MemberCase,              value: lower_case }
+  - { key: readability-identifier-naming.ConstantCase,            value: lower_case }
+  - { key: readability-identifier-naming.MacroDefinitionCase,     value: UPPER_CASE }
+  - { key: readability-identifier-naming.TemplateParameterCase,   value: CamelCase }
+  - { key: modernize-use-default-member-init.UseAssignment,       value: 'true' }
+  - { key: cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor, value: 'true' }
+  - { key: cppcoreguidelines-special-member-functions.AllowMissingMoveFunctions, value: 'true' }

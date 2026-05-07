@@ -1,0 +1,14 @@
+[wrap-git]
+url = https://github.com/kidoz/ctorwire.git
+revision = b0adf844e5d4c48f90f92a9818e298079a8285a5
+depth = 1
+
+[wrap-default-options]
+werror = false
+build_tests = false
+build_examples = false
+enable_format_check = false
+enable_clang_tidy = false
+
+[provide]
+ctorwire = ctorwire_dep

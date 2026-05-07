@@ -1,0 +1,16 @@
+[wrap-git]
+url = https://github.com/kidoz/asterorm.git
+revision = ee3dab4af6a29bdfe718e0851adcf3042350938b
+depth = 1
+
+[wrap-default-options]
+tests = false
+examples = false
+clickhouse = disabled
+# `enabled` requires libpq on the build host; the postgres-backed
+# Repository in src/catalog needs the asterorm_pg_dep adapter.
+postgres = enabled
+
+[provide]
+asterorm = asterorm_core_dep
+asterorm-pg = asterorm_pg_dep
