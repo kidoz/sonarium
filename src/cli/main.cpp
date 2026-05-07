@@ -8,6 +8,8 @@
 #include "catalog/in_memory_repository.hpp"
 #include "catalog/postgres_repository.hpp"
 #include "catalog/repository.hpp"
+#include "cli/dlna_status.hpp"
+#include "cli/http_client.hpp"
 #include "core/version.hpp"
 #include "scanner/media_scanner.hpp"
 
@@ -22,7 +24,8 @@ void print_usage(std::string_view argv0) {
               << "  scan <path>                   — dry-run preview: walk <path> with an\n"
               << "                                  in-memory catalog, print the tree, no DB\n"
               << "  transcode --track-id <id>     — TODO\n"
-              << "  dlna status                   — TODO\n";
+              << "  dlna status [--url URL]       — probe a running sonarium-dlna server\n"
+              << "                                  (URL defaults to http://127.0.0.1:18200)\n";
 }
 
 [[nodiscard]] std::string env_or(std::string_view name, std::string fallback) {
@@ -101,6 +104,76 @@ void print_scan_tree(sonarium::catalog::Repository const& repo) {
     }
 }
 
+int cmd_dlna_status(std::string_view base_url) {
+    auto parsed = sonarium::cli::parse_http_url(base_url);
+    if (!parsed.has_value()) {
+        std::cerr << "sonariumctl dlna status: bad URL: " << parsed.error() << '\n';
+        return 2;
+    }
+
+    sonarium::cli::HttpRequest desc_req;
+    desc_req.method = "GET";
+    desc_req.url = *parsed;
+    desc_req.url.path = "/description.xml";
+    auto desc_resp = sonarium::cli::http_request(desc_req);
+    if (!desc_resp.has_value()) {
+        std::cerr << "sonariumctl dlna status: GET /description.xml failed: " << desc_resp.error()
+                  << '\n';
+        return 3;
+    }
+    if (desc_resp->status != 200) {
+        std::cerr << "sonariumctl dlna status: /description.xml returned status "
+                  << desc_resp->status << '\n';
+        return 3;
+    }
+    auto status = sonarium::cli::parse_description_xml(desc_resp->body);
+    if (!status.has_value()) {
+        std::cerr << "sonariumctl dlna status: " << status.error() << '\n';
+        return 3;
+    }
+
+    sonarium::cli::HttpRequest browse_req;
+    browse_req.method = "POST";
+    browse_req.url = *parsed;
+    browse_req.url.path = "/upnp/control/content-directory";
+    browse_req.headers.emplace_back("Content-Type", "text/xml; charset=\"utf-8\"");
+    browse_req.headers.emplace_back("SOAPACTION",
+                                    "\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"");
+    browse_req.body = sonarium::cli::build_browse_request("0", 0, 200);
+    auto browse_resp = sonarium::cli::http_request(browse_req);
+    if (!browse_resp.has_value()) {
+        std::cerr << "sonariumctl dlna status: Browse(0) failed: " << browse_resp.error() << '\n';
+        return 3;
+    }
+    if (browse_resp->status != 200) {
+        std::cerr << "sonariumctl dlna status: Browse(0) returned status " << browse_resp->status
+                  << '\n';
+        return 3;
+    }
+    auto summary = sonarium::cli::parse_browse_response(browse_resp->body);
+    if (summary.has_value()) {
+        status->total_matches = summary->total_matches;
+        status->number_returned = summary->number_returned;
+        status->system_update_id = summary->update_id;
+    } else {
+        std::cerr << "sonariumctl dlna status: " << summary.error() << '\n';
+        return 3;
+    }
+
+    std::cout << "url:          http://" << parsed->host << ':' << parsed->port << '\n'
+              << "friendly:     " << status->friendly_name << '\n'
+              << "udn:          " << status->udn << '\n'
+              << "model:        " << status->model_name;
+    if (!status->model_number.empty()) {
+        std::cout << " (" << status->model_number << ')';
+    }
+    std::cout << '\n'
+              << "root items:   " << status->total_matches << " total, " << status->number_returned
+              << " returned\n"
+              << "update_id:    " << status->system_update_id << '\n';
+    return 0;
+}
+
 int cmd_scan(std::string_view path) {
     sonarium::catalog::InMemoryRepository repo;
 
@@ -159,6 +232,20 @@ int main(int argc, char** argv) {
             return 2;
         }
         return cmd_scan(std::string_view{args[2]});
+    }
+    if (cmd == "dlna" && args.size() >= 3 && std::string_view{args[2]} == "status") {
+        std::string url = "http://127.0.0.1:18200";
+        for (std::size_t i = 3; i < args.size(); ++i) {
+            std::string_view const a{args[i]};
+            if (a == "--url" && (i + 1) < args.size()) {
+                url = std::string{args[i + 1]};
+                ++i;
+            } else {
+                std::cerr << "sonariumctl dlna status: unknown arg '" << a << "'\n";
+                return 2;
+            }
+        }
+        return cmd_dlna_status(url);
     }
 
     std::cerr << "sonariumctl: command '" << cmd << "' not yet implemented\n";

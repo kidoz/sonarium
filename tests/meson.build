@@ -5,6 +5,7 @@ subdir('scanner')
 subdir('dlna-core')
 subdir('upnp')
 subdir('composition')
+subdir('cli')
 
 # Top-level smoke test: confirms Catch2 wiring works without any sonarium dep.
 sonarium_smoke_tests = executable(
