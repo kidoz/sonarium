@@ -26,10 +26,13 @@ struct SegmenterConfig {
 [[nodiscard]] bool is_safe_cache_filename(std::string_view name) noexcept;
 
 // Build the argv for ffmpeg's HLS muxer. Output goes to `<output_dir>` with
-// segments named seg00000.ts and a sibling index.m3u8.
-[[nodiscard]] std::vector<std::string> build_segmenter_argv(std::filesystem::path const& source,
-                                                            std::filesystem::path const& output_dir,
-                                                            SegmenterConfig const& cfg);
+// segments named seg00000.ts and a sibling index.m3u8. `bitrate_kbps_override`
+// of 0 means "use cfg.bitrate_kbps".
+[[nodiscard]] std::vector<std::string>
+build_segmenter_argv(std::filesystem::path const& source,
+                     std::filesystem::path const& output_dir,
+                     SegmenterConfig const& cfg,
+                     std::uint32_t bitrate_kbps_override = 0);
 
 class Segmenter {
 public:
@@ -41,7 +44,9 @@ public:
     // mutex serializes concurrent first-time requests so we don't fork
     // duplicate segmenters.
     [[nodiscard]] std::expected<std::filesystem::path, std::string>
-    ensure_segments(std::string const& rendition_id, std::filesystem::path const& source_path);
+    ensure_segments(std::string const& rendition_id,
+                    std::filesystem::path const& source_path,
+                    std::uint32_t bitrate_kbps_override = 0);
 
     // Resolve a filename (e.g. "seg00001.ts" / "index.m3u8") within a
     // rendition's cache dir. Returns nullopt for unsafe names or names that

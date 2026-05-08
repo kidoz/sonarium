@@ -216,8 +216,13 @@ void register_hls_routes(::atria::Application& app,
                 return m3u8_ok(sonarium::hls::build_media_playlist(variant));
             }
 
-            auto playlist_path =
-                segmenter->ensure_segments(std::string{id}, rendition->storage_path);
+            // Use the rendition's natural bitrate so an ABR set with
+            // different rendition.bitrate_bps values produces actually
+            // distinct segment ladders. Zero falls back to the cfg default.
+            auto const per_rendition_kbps =
+                (rendition->bitrate_bps > 0) ? (rendition->bitrate_bps / 1000U) : 0U;
+            auto playlist_path = segmenter->ensure_segments(
+                std::string{id}, rendition->storage_path, per_rendition_kbps);
             if (!playlist_path.has_value()) {
                 ::atria::Response r{::atria::Status::InternalServerError};
                 r.set_body("segmenter: " + playlist_path.error() + "\n");

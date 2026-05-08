@@ -119,7 +119,10 @@ bool is_safe_cache_filename(std::string_view name) noexcept {
 
 std::vector<std::string> build_segmenter_argv(std::filesystem::path const& source,
                                               std::filesystem::path const& output_dir,
-                                              SegmenterConfig const& cfg) {
+                                              SegmenterConfig const& cfg,
+                                              std::uint32_t bitrate_kbps_override) {
+    auto const effective_bitrate =
+        (bitrate_kbps_override > 0) ? bitrate_kbps_override : cfg.bitrate_kbps;
     auto const playlist = output_dir / "index.m3u8";
     auto const seg_pattern = output_dir / "seg%05d.ts";
     return {
@@ -135,7 +138,7 @@ std::vector<std::string> build_segmenter_argv(std::filesystem::path const& sourc
         "-c:a",
         "aac",
         "-b:a",
-        std::to_string(cfg.bitrate_kbps) + "k",
+        std::to_string(effective_bitrate) + "k",
         "-f",
         "hls",
         "-hls_time",
@@ -169,7 +172,8 @@ std::shared_ptr<std::mutex> Segmenter::mutex_for(std::string const& rendition_id
 
 std::expected<std::filesystem::path, std::string>
 Segmenter::ensure_segments(std::string const& rendition_id,
-                           std::filesystem::path const& source_path) {
+                           std::filesystem::path const& source_path,
+                           std::uint32_t bitrate_kbps_override) {
     if (!is_safe_rendition_id(rendition_id)) {
         return std::unexpected("invalid rendition id: " + rendition_id);
     }
@@ -201,7 +205,7 @@ Segmenter::ensure_segments(std::string const& rendition_id,
         return std::unexpected("create_directories: " + ec.message());
     }
 
-    auto const argv = build_segmenter_argv(source_path, dir, config_);
+    auto const argv = build_segmenter_argv(source_path, dir, config_, bitrate_kbps_override);
     auto status = spawn_and_wait(argv);
     if (!status.has_value()) {
         return std::unexpected(status.error());

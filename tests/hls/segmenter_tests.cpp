@@ -57,6 +57,44 @@ TEST_CASE("build_segmenter_argv embeds source / output / bitrate / segment secon
     REQUIRE(argv.back() == "/tmp/cache/track1/index.m3u8");
 }
 
+TEST_CASE("build_segmenter_argv respects per-rendition bitrate override", "[hls][segmenter]") {
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = "/tmp/cache";
+    cfg.segment_duration_seconds = 6;
+    cfg.bitrate_kbps = 192;
+
+    auto const argv =
+        sonarium::hls::build_segmenter_argv("/in.flac", "/tmp/cache/track1", cfg, 320);
+
+    auto const find = [&](std::string_view flag) -> std::string {
+        for (std::size_t i = 0; i + 1 < argv.size(); ++i) {
+            if (argv[i] == flag) {
+                return argv[i + 1];
+            }
+        }
+        return {};
+    };
+    REQUIRE(find("-b:a") == "320k"); // override wins over cfg default
+}
+
+TEST_CASE("build_segmenter_argv falls back to cfg default when override is zero",
+          "[hls][segmenter]") {
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = "/tmp/cache";
+    cfg.bitrate_kbps = 192;
+    auto const argv = sonarium::hls::build_segmenter_argv("/in.flac", "/tmp/cache/track1", cfg, 0);
+
+    auto const find = [&](std::string_view flag) -> std::string {
+        for (std::size_t i = 0; i + 1 < argv.size(); ++i) {
+            if (argv[i] == flag) {
+                return argv[i + 1];
+            }
+        }
+        return {};
+    };
+    REQUIRE(find("-b:a") == "192k");
+}
+
 TEST_CASE("Segmenter::cached_file rejects unsafe rendition ids", "[hls][segmenter]") {
     sonarium::hls::SegmenterConfig cfg;
     cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-test-cache";
