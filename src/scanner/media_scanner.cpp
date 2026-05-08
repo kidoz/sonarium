@@ -203,10 +203,28 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
             }
         }
 
+        // ffprobe pulls duration / bitrate / sample-rate / channel info plus
+        // optional artist/album/title tags. On failure (binary missing,
+        // unrecognised file, fake bytes) we fall back to zeros and to the
+        // path-derived display names.
+        //
+        // Tags fill the *display* fields only — IDs stay slug-derived from
+        // the path so re-scans remain idempotent. First track to claim an
+        // artist/album row wins (via the seen_* dedupe); subsequent files
+        // don't churn the row even if their tags disagree.
+        AudioMetadata audio{};
+        if (auto md = read_audio_metadata(path); md.has_value()) {
+            audio = *md;
+        }
+
+        auto const display_artist = audio.artist.has_value() ? *audio.artist : parsed->artist_name;
+        auto const display_album = audio.album.has_value() ? *audio.album : parsed->album_name;
+        auto const display_title = audio.title.has_value() ? *audio.title : parsed->track_title;
+
         if (!seen_artists.contains(artist_id)) {
             Artist artist;
             artist.id = artist_id;
-            artist.name = parsed->artist_name;
+            artist.name = display_artist;
             artist.sort_name = artist_slug;
             if (auto r = writer.upsert_artist(artist); r.has_value()) {
                 ++report.artists_upserted;
@@ -221,7 +239,7 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
             Album album;
             album.id = album_id;
             album.artist_id = artist_id;
-            album.title = parsed->album_name;
+            album.title = display_album;
             album.sort_title = album_slug;
             album.cover_art_asset_id = cover_asset_id;
             if (auto r = writer.upsert_album(album); r.has_value()) {
@@ -233,20 +251,11 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
             }
         }
 
-        // ffprobe pulls duration / bitrate / sample-rate / channel info out of
-        // the file. On failure (binary missing, unrecognised file, fake bytes)
-        // we fall back to zeros — the catalog stays usable, just without
-        // accurate playback metadata.
-        AudioMetadata audio{};
-        if (auto md = read_audio_metadata(path); md.has_value()) {
-            audio = *md;
-        }
-
         Track track;
         track.id = track_id;
         track.album_id = album_id;
         track.artist_id = artist_id;
-        track.title = parsed->track_title;
+        track.title = display_title;
         track.sort_title = track_slug;
         track.track_number = parsed->track_number;
         track.duration_ms = audio.duration_ms;
