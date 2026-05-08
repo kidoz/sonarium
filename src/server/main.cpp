@@ -235,9 +235,11 @@ void register_hls_routes(::atria::Application& app,
             return m3u8_ok(std::move(*body));
         });
 
-    // GET /hls/renditions/{id}/{seg} — serve a cached .ts segment. Filename
-    // is validated against `seg\d{5}\.ts`; nothing else is allowed.
-    app.get("/hls/renditions/{id}/{seg}", [segmenter](::atria::Request& req) -> ::atria::Response {
+    // GET / HEAD /hls/renditions/{id}/{seg} — serve a cached .ts segment.
+    // Filename is validated against `seg\d{5}\.ts`; nothing else is allowed.
+    // atria::Response::file() handles HEAD natively (no body, same headers)
+    // and honors Range, so both verbs share the same lambda.
+    auto segment_handler = [segmenter](::atria::Request& req) -> ::atria::Response {
         auto const id = req.path_param("id").value_or("");
         auto const seg = req.path_param("seg").value_or("");
         if (id.empty() || seg.empty()) {
@@ -251,7 +253,9 @@ void register_hls_routes(::atria::Application& app,
         opts.content_type = "video/mp2t";
         opts.allow_range = true;
         return ::atria::Response::file(req, *path, std::move(opts));
-    });
+    };
+    app.get("/hls/renditions/{id}/{seg}", segment_handler);
+    app.head("/hls/renditions/{id}/{seg}", segment_handler);
 }
 
 } // namespace
