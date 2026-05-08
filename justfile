@@ -59,8 +59,8 @@ distclean: clean
 test: build
     meson test -C {{build_dir}} \
         --suite=core --suite=media --suite=catalog --suite=scanner --suite=dlna-core \
-        --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=cli \
-        --suite=smoke
+        --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=worker \
+        --suite=cli --suite=smoke
 
 # Run a single suite — e.g. `just test-suite composition`.
 test-suite suite: build

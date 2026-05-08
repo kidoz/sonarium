@@ -6,15 +6,16 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 
 #include "catalog/postgres_repository.hpp"
 #include "core/version.hpp"
 #include "scanner/media_scanner.hpp"
+#include "worker/fs_watcher.hpp"
 
 namespace {
 
@@ -67,17 +68,6 @@ void print_report(sonarium::scanner::ScanReport const& r) {
     }
 }
 
-// Sleep for `total` seconds in 1-second slices so SIGINT/SIGTERM lands within
-// a second of the user pressing Ctrl-C instead of waiting out the full cycle.
-void interruptible_sleep_seconds(std::int64_t total) {
-    for (std::int64_t i = 0; i < total; ++i) {
-        if (g_stop.load(std::memory_order_relaxed)) {
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::seconds{1});
-    }
-}
-
 [[nodiscard]] std::int64_t parse_poll_interval(std::span<char* const> args) {
     auto const flag = flag_value(args, "--interval");
     auto const env = std::getenv("SONARIUM_WORKER_POLL_INTERVAL_SECONDS");
@@ -114,11 +104,12 @@ int main(int argc, char** argv) {
     }
 
     auto const watch = has_flag(args, "--watch");
+    auto const force_polling = has_flag(args, "--poll");
     auto const poll_seconds = parse_poll_interval(args);
 
     std::cout << "  root=" << root << '\n' << "  backend=postgres\n";
     if (watch) {
-        std::cout << "  mode=watch (interval=" << poll_seconds << "s)\n";
+        std::cout << "  mode=watch (max-interval=" << poll_seconds << "s)\n";
     } else {
         std::cout << "  mode=one-shot\n";
     }
@@ -147,12 +138,33 @@ int main(int argc, char** argv) {
         return first.errors.empty() ? 0 : 1;
     }
 
+    // Pick the watcher backend. Native (inotify/FSEvents) wakes up the worker
+    // on real filesystem activity; polling falls back to a fixed interval.
+    // `--poll` forces polling even when a native backend is available — handy
+    // when running in a container where the kernel's notify subsystem isn't
+    // wired through.
+    std::unique_ptr<sonarium::worker::FsWatcher> watcher;
+    if (!force_polling) {
+        if (auto native = sonarium::worker::make_native_fs_watcher(root); native.has_value()) {
+            watcher = std::move(*native);
+        } else {
+            std::cout << "  watcher: native unavailable (" << native.error()
+                      << ") — falling back to polling\n";
+        }
+    }
+    if (!watcher) {
+        watcher = sonarium::worker::make_polling_fs_watcher(std::chrono::seconds{poll_seconds});
+    }
+    std::cout << "  watcher=" << watcher->backend_name() << '\n';
+
     while (!g_stop.load(std::memory_order_relaxed)) {
-        interruptible_sleep_seconds(poll_seconds);
+        bool const changed = watcher->wait_for_change(std::chrono::seconds{poll_seconds}, g_stop);
         if (g_stop.load(std::memory_order_relaxed)) {
             break;
         }
-        run_pass();
+        if (changed) {
+            run_pass();
+        }
     }
     std::cout << "  worker stopped\n";
     return 0;
