@@ -17,6 +17,7 @@
 #include "catalog/postgres_repository.hpp"
 #include "catalog/repository.hpp"
 #include "core/media_token.hpp"
+#include "core/operator_mode.hpp"
 #include "core/version.hpp"
 #include "hls/playlist_builder.hpp"
 #include "hls/segmenter.hpp"
@@ -297,12 +298,35 @@ int main() {
     auto signer = std::make_shared<sonarium::core::MediaTokenSigner>(
         token_secret, std::chrono::seconds{token_ttl_seconds});
 
+    auto const mode = sonarium::core::current_operator_mode();
+    auto const allow_public_bind = env_or("SONARIUM_ALLOW_PUBLIC_BIND", "0") != "0";
+    auto const violations = sonarium::core::check_startup_invariants({
+        .bind_host = bind_host,
+        .media_token_secret = token_secret,
+        .pg_conninfo = pg_conninfo,
+        .allow_public_bind = allow_public_bind,
+    });
+    auto const fatal = mode == sonarium::core::OperatorMode::production && !violations.empty();
+    for (auto const& vio : violations) {
+        std::cerr << "  " << (fatal ? "FATAL: " : "WARN: ") << vio << '\n';
+    }
+    if (fatal) {
+        std::cerr
+            << "  refusing to start: production mode requires safe defaults — set SONARIUM_MODE="
+               "development to override during local testing\n";
+        return 2;
+    }
+
     std::shared_ptr<sonarium::catalog::Repository> catalog;
     std::string catalog_kind;
     if (!pg_conninfo.empty()) {
         catalog = try_open_postgres_catalog(pg_conninfo);
         if (catalog) {
             catalog_kind = "postgres";
+        } else if (mode == sonarium::core::OperatorMode::production) {
+            std::cerr << "  FATAL: catalog unavailable and production mode forbids in-memory "
+                         "fallback\n";
+            return 3;
         }
     }
     if (!catalog) {
@@ -312,6 +336,7 @@ int main() {
 
     std::cout << sonarium::core::product_name() << " server " << v.major << '.' << v.minor << '.'
               << v.patch << " (HLS)\n"
+              << "  mode=" << sonarium::core::to_string(mode) << '\n'
               << "  bind_host=" << bind_host << '\n'
               << "  http_port=" << http_port << '\n'
               << "  self_base=" << self_base << '\n'

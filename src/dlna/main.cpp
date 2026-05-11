@@ -24,6 +24,7 @@
 #include "composition/service_config.hpp"
 #include "composition/ssdp_service.hpp"
 #include "core/logspine_logger.hpp"
+#include "core/operator_mode.hpp"
 #include "core/version.hpp"
 #include "dlna-core/connection_manager_handler.hpp"
 #include "dlna-core/device_profile.hpp"
@@ -232,16 +233,42 @@ int main(int argc, char** argv) {
     auto const token_secret = env_or("SONARIUM_MEDIA_TOKEN_SECRET", "");
     auto signer = std::make_shared<sonarium::core::MediaTokenSigner>(token_secret);
 
-    // Repository selection: if SONARIUM_PG_CONNINFO is present, prefer the
-    // Postgres-backed Repository; on connection / migration failure, fall back
-    // to the in-memory sample so the server still demonstrates the routes.
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const mode = sonarium::core::current_operator_mode();
+    auto const allow_public_bind = env_or("SONARIUM_ALLOW_PUBLIC_BIND", "0") != "0";
+    auto const violations = sonarium::core::check_startup_invariants({
+        .bind_host = bind_host,
+        .media_token_secret = token_secret,
+        .pg_conninfo = pg_conninfo,
+        .allow_public_bind = allow_public_bind,
+    });
+    auto const fatal = mode == sonarium::core::OperatorMode::production && !violations.empty();
+    for (auto const& vio : violations) {
+        std::cerr << "  " << (fatal ? "FATAL: " : "WARN: ") << vio << '\n';
+    }
+    if (fatal) {
+        std::cerr
+            << "  refusing to start: production mode requires safe defaults — set SONARIUM_MODE="
+               "development to override during local testing\n";
+        logging.registry->flush();
+        return 2;
+    }
+
+    // Repository selection: if SONARIUM_PG_CONNINFO is present, prefer the
+    // Postgres-backed Repository. In production we fail closed on connect /
+    // migration error; in development we fall back to the in-memory sample so
+    // the routes still demo without a database.
     std::shared_ptr<sonarium::catalog::Repository> catalog;
     std::string catalog_kind;
     if (!pg_conninfo.empty()) {
         catalog = try_open_postgres_catalog(pg_conninfo);
         if (catalog) {
             catalog_kind = "postgres";
+        } else if (mode == sonarium::core::OperatorMode::production) {
+            std::cerr << "  FATAL: catalog unavailable and production mode forbids in-memory "
+                         "fallback\n";
+            logging.registry->flush();
+            return 3;
         }
     }
     if (!catalog) {
@@ -256,6 +283,7 @@ int main(int argc, char** argv) {
 
     std::cout << sonarium::core::product_name() << " DLNA " << v.major << '.' << v.minor << '.'
               << v.patch << '\n'
+              << "  mode=" << sonarium::core::to_string(mode) << '\n'
               << "  bind_host=" << bind_host << '\n'
               << "  advertised_host=" << advertised_host << '\n'
               << "  http_port=" << http_port << '\n'
