@@ -138,4 +138,36 @@ constexpr std::array<std::string_view, 12> all_statements = {
     rendition_track_idx_ddl,
 };
 
+// ---------------------------------------------------------------------------
+// Schema versioning. The baseline above (all_statements) *is* version 1.
+//
+// To evolve the schema:
+//   1. append a Migration entry below with the DDL that upgrades
+//      version N to N+1 (never edit all_statements or older migrations),
+//   2. bump current_version to N+1.
+//
+// ensure_schema() records the applied version in `schema_version`, applies
+// any pending migrations in order, and refuses to run against a database
+// whose recorded version is newer than this binary.
+// ---------------------------------------------------------------------------
+
+constexpr std::string_view schema_version_ddl = R"sql(
+CREATE TABLE IF NOT EXISTS schema_version (
+    version     INTEGER PRIMARY KEY,
+    applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+)sql";
+
+constexpr int current_version = 1;
+
+struct Migration {
+    int to_version;
+    std::string_view statement;
+};
+
+// Ordered list of upgrade steps beyond the baseline. Empty today; the first
+// real migration will look like:
+//   { 2, "ALTER TABLE track ADD COLUMN IF NOT EXISTS lyrics TEXT" },
+constexpr std::array<Migration, 0> migrations = {};
+
 } // namespace sonarium::catalog::postgres_schema

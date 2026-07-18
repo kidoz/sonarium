@@ -4,6 +4,7 @@
 #include <string>
 
 #include "catalog/postgres_repository.hpp"
+#include "catalog/postgres_schema.hpp"
 
 using sonarium::catalog::Artist;
 using sonarium::catalog::PageRequest;
@@ -223,4 +224,25 @@ TEST_CASE("PostgresRepository round-trips every entity type", "[catalog][postgre
     }
 
     wipe();
+}
+
+TEST_CASE("ensure_schema records the schema version", "[catalog][postgres]") {
+    auto const conninfo = conninfo_or_skip();
+    if (conninfo.empty()) {
+        SKIP("SONARIUM_PG_CONNINFO unset — live Postgres test skipped");
+    }
+
+    auto repo = PostgresRepository::open(conninfo);
+    REQUIRE(repo.has_value());
+    REQUIRE((*repo)->ensure_schema().has_value());
+
+    ::asterorm::pg::driver driver;
+    auto conn = driver.connect(conninfo);
+    REQUIRE(conn.has_value());
+    auto rows = conn->execute("SELECT MAX(version) FROM schema_version");
+    REQUIRE(rows.has_value());
+    REQUIRE(rows->rows() == 1);
+    auto const cell = rows->get_string(0, 0);
+    REQUIRE(cell.has_value());
+    REQUIRE(*cell == std::to_string(sonarium::catalog::postgres_schema::current_version));
 }

@@ -162,12 +162,67 @@ PostgresRepository::count_params(std::string_view sql,
 
 std::expected<void, std::string> PostgresRepository::ensure_schema() {
     std::scoped_lock const lock{mutex_};
-    for (auto const& sql : postgres_schema::all_statements) {
+
+    auto const run = [this](std::string_view sql) -> std::expected<void, std::string> {
         auto res = conn_->execute(sql);
         if (!res.has_value()) {
             return std::unexpected(std::string{"ensure_schema failed: "} + res.error().message);
         }
+        return {};
+    };
+
+    if (auto r = run(postgres_schema::schema_version_ddl); !r.has_value()) {
+        return r;
     }
+
+    int stored_version = 0;
+    {
+        auto res = conn_->execute("SELECT COALESCE(MAX(version), 0) FROM schema_version");
+        if (!res.has_value()) {
+            return std::unexpected(std::string{"ensure_schema failed: "} + res.error().message);
+        }
+        stored_version = static_cast<int>(first_cell_as_u32(*res));
+    }
+
+    if (stored_version > postgres_schema::current_version) {
+        return std::unexpected(
+            "ensure_schema refused: database schema is v" + std::to_string(stored_version)
+            + " but this binary only understands v"
+            + std::to_string(postgres_schema::current_version) + " — upgrade the binary");
+    }
+
+    // Baseline (idempotent CREATE ... IF NOT EXISTS) is schema version 1.
+    // Databases provisioned before versioning existed simply record v1 here.
+    if (stored_version == 0) {
+        for (auto const& sql : postgres_schema::all_statements) {
+            if (auto r = run(sql); !r.has_value()) {
+                return r;
+            }
+        }
+        if (auto r = run("INSERT INTO schema_version (version) VALUES (1) "
+                         "ON CONFLICT (version) DO NOTHING");
+            !r.has_value()) {
+            return r;
+        }
+        stored_version = 1;
+    }
+
+    for (auto const& migration : postgres_schema::migrations) {
+        if (migration.to_version <= stored_version) {
+            continue;
+        }
+        if (auto r = run(migration.statement); !r.has_value()) {
+            return r;
+        }
+        if (auto r =
+                run("INSERT INTO schema_version (version) VALUES ("
+                    + std::to_string(migration.to_version) + ") ON CONFLICT (version) DO NOTHING");
+            !r.has_value()) {
+            return r;
+        }
+        stored_version = migration.to_version;
+    }
+
     return {};
 }
 
