@@ -15,11 +15,18 @@
 
 namespace sonarium::catalog {
 
-// UPnP Browse pagination request. RequestedCount == 0 means "all remaining".
+// UPnP Browse pagination request. RequestedCount == 0 means "all remaining",
+// which every backend caps at `max_browse_page_size` — clients paginate via
+// the TotalMatches the Browse response reports.
 struct PageRequest {
     std::uint32_t starting_index = 0;
     std::uint32_t requested_count = 0;
 };
+
+// Hard upper bound on rows a single listing call returns, shared by every
+// Repository implementation so Browse behaves identically against the
+// in-memory and Postgres backends.
+inline constexpr std::uint32_t max_browse_page_size = 1024;
 
 template <typename T>
 struct Page {

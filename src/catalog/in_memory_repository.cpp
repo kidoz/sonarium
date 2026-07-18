@@ -38,9 +38,10 @@ paginate(std::unordered_map<std::string, T> const& source, PageRequest req, Pred
         return out;
     }
     auto const remaining = static_cast<std::uint32_t>(filtered.size()) - req.starting_index;
-    auto const take = (req.requested_count == 0 || req.requested_count > remaining)
-                          ? remaining
-                          : req.requested_count;
+    auto const requested = (req.requested_count == 0)
+                               ? max_browse_page_size
+                               : std::min(req.requested_count, max_browse_page_size);
+    auto const take = std::min(requested, remaining);
     out.rows.reserve(take);
     for (std::uint32_t i = 0; i < take; ++i) {
         out.rows.push_back(std::move(filtered[req.starting_index + i]));

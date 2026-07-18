@@ -13,8 +13,6 @@ namespace sonarium::catalog {
 
 namespace {
 
-constexpr std::size_t default_page_count = 1024;
-
 [[nodiscard]] std::vector<std::optional<std::string>>
 to_params(std::initializer_list<std::optional<std::string>> values) {
     return std::vector<std::optional<std::string>>{values};
@@ -89,7 +87,7 @@ get_optional_text(::asterorm::pg::result const& rows, int r, int c) {
 }
 
 [[nodiscard]] std::uint32_t requested_or_default(std::uint32_t requested) noexcept {
-    return (requested == 0) ? static_cast<std::uint32_t>(default_page_count) : requested;
+    return (requested == 0) ? max_browse_page_size : std::min(requested, max_browse_page_size);
 }
 
 [[nodiscard]] std::uint32_t first_cell_as_u32(::asterorm::pg::result const& res) {
