@@ -30,8 +30,7 @@ namespace {
 TEST_CASE("PostgresRepository connect + ensure_schema", "[catalog][postgres]") {
     auto const conninfo = conninfo_or_skip();
     if (conninfo.empty()) {
-        SUCCEED("SONARIUM_PG_CONNINFO unset — skipping live Postgres test");
-        return;
+        SKIP("SONARIUM_PG_CONNINFO unset — live Postgres test skipped");
     }
 
     auto repo = PostgresRepository::open(conninfo);
@@ -45,8 +44,7 @@ TEST_CASE("PostgresRepository connect + ensure_schema", "[catalog][postgres]") {
 TEST_CASE("PostgresRepository list_artists round-trip", "[catalog][postgres]") {
     auto const conninfo = conninfo_or_skip();
     if (conninfo.empty()) {
-        SUCCEED("SONARIUM_PG_CONNINFO unset — skipping live Postgres test");
-        return;
+        SKIP("SONARIUM_PG_CONNINFO unset — live Postgres test skipped");
     }
 
     auto repo_result = PostgresRepository::open(conninfo);
@@ -64,8 +62,7 @@ TEST_CASE("PostgresRepository list_artists round-trip", "[catalog][postgres]") {
 TEST_CASE("PostgresRepository system_update_id is non-negative", "[catalog][postgres]") {
     auto const conninfo = conninfo_or_skip();
     if (conninfo.empty()) {
-        SUCCEED("SONARIUM_PG_CONNINFO unset — skipping live Postgres test");
-        return;
+        SKIP("SONARIUM_PG_CONNINFO unset — live Postgres test skipped");
     }
 
     auto repo = PostgresRepository::open(conninfo).value();
@@ -80,8 +77,7 @@ TEST_CASE("PostgresRepository system_update_id is non-negative", "[catalog][post
 TEST_CASE("PostgresRepository round-trips every entity type", "[catalog][postgres]") {
     auto const conninfo = conninfo_or_skip();
     if (conninfo.empty()) {
-        SUCCEED("SONARIUM_PG_CONNINFO unset — skipping live Postgres test");
-        return;
+        SKIP("SONARIUM_PG_CONNINFO unset — live Postgres test skipped");
     }
 
     auto repo = PostgresRepository::open(conninfo).value();
