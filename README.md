@@ -68,6 +68,7 @@ Sonarium ships with two operator modes selected via `SONARIUM_MODE`:
   - wildcard bind (`0.0.0.0`, `::`, empty) without `SONARIUM_ALLOW_PUBLIC_BIND=1`
   - empty `SONARIUM_MEDIA_TOKEN_SECRET` (direct media URLs would be unauthenticated)
   - empty `SONARIUM_PG_CONNINFO` (the demo in-memory catalog must not run in production)
+  - empty `SONARIUM_MEDIA_ROOT` (served file paths would not be contained to a library root)
   - Postgres connect/schema failure (no silent fallback to the demo catalog)
 
 A minimal production invocation:
@@ -77,8 +78,31 @@ SONARIUM_MODE=production \
 SONARIUM_DLNA_BIND_HOST=192.168.1.10 \
 SONARIUM_MEDIA_TOKEN_SECRET="$(openssl rand -hex 32)" \
 SONARIUM_PG_CONNINFO="host=db user=sonarium dbname=sonarium" \
+SONARIUM_MEDIA_ROOT=/srv/music \
 ./buildDir/src/dlna/sonarium-dlna
 ```
+
+## Media tokens and path containment
+
+With `SONARIUM_MEDIA_TOKEN_SECRET` set, every media-serving route requires a
+signed `?expires=...&sig=...` pair (HMAC-SHA256 over `<resource-id>|<expires>`):
+
+- `sonarium-dlna` — `/media/renditions/{id}` (tokens are minted into DIDL-Lite
+  resource URLs automatically).
+- `sonarium-server` — all HLS routes. `/hls/tracks/{id}/master.m3u8` verifies a
+  track-bound token; the variant and segment URLs it emits carry their own
+  rendition-bound tokens, so a client only needs a signed master URL to play.
+  Untokened or forged requests get `403`.
+
+When `SONARIUM_MEDIA_ROOT` is set, both servers refuse to serve (or transcode)
+any catalog storage path that does not canonicalize to a location inside that
+root — symlinks pointing outside the library are rejected. Empty (dev mode)
+disables containment.
+
+The HLS segment cache is bounded: least-recently-used renditions are evicted
+once the cache exceeds `SONARIUM_HLS_CACHE_MAX_MB`, and at most
+`SONARIUM_HLS_MAX_TRANSCODES` ffmpeg jobs run at once — requests that would
+exceed the bound receive `503` with `Retry-After` instead of queueing.
 
 ## Environment variables
 
@@ -99,8 +123,11 @@ SONARIUM_PG_CONNINFO="host=db user=sonarium dbname=sonarium" \
 | `SONARIUM_MEDIA_BASE_URL`           | server         | Base URL for `/media/renditions/...` (points at sonarium-dlna)   |
 | `SONARIUM_HLS_CACHE_DIR`            | server         | On-disk segment cache (default `$TMPDIR/sonarium-hls`)            |
 | `SONARIUM_HLS_SEGMENT_SECONDS`      | server         | Segment duration (default `6`)                                   |
-| `SONARIUM_MEDIA_ROOT`               | worker         | Root directory for the filesystem watcher                        |
+| `SONARIUM_HLS_CACHE_MAX_MB`         | server         | Segment-cache size cap in MiB, LRU-evicted (default `8192`, `0` = unbounded) |
+| `SONARIUM_HLS_MAX_TRANSCODES`       | server         | Max concurrent ffmpeg segmentation jobs (default `2`)            |
+| `SONARIUM_MEDIA_ROOT`               | dlna / server / worker | Library root: containment boundary for served paths; scan root for the worker. Required in production |
 | `SONARIUM_WORKER_POLL_INTERVAL_SECONDS` | worker     | Polling fallback interval                                        |
+| `SONARIUM_WORKER_DEBOUNCE_SECONDS`  | worker         | Quiet period after FS events before rescanning (default `2`)     |
 
 ## Postgres backend
 
