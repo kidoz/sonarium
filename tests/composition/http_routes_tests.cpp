@@ -434,3 +434,25 @@ TEST_CASE("Album with missing asset file returns 404", "[composition][http][albu
     auto const res = app->dispatch(req);
     REQUIRE(res.status() == ::atria::Status::NotFound);
 }
+
+TEST_CASE("Malformed and unsatisfiable Range headers return 416", "[composition][http][media]") {
+    TempFile const tmp{"sonarium-media-badrange.bin", "ABCDEFGHIJKLMNOPQRST"};
+    auto app = build_app(repo_with_rendition("demo", tmp.path_string()));
+
+    auto const range_request = [&](std::string range) {
+        ::atria::Headers headers;
+        headers.set("Host", "127.0.0.1");
+        headers.set("Range", std::move(range));
+        return ::atria::Request{
+            ::atria::Method::Get, "/media/renditions/demo", {}, std::move(headers), {}};
+    };
+
+    auto garbage = range_request("bytes=zz-");
+    REQUIRE(app->dispatch(garbage).status() == ::atria::Status::RangeNotSatisfiable);
+
+    auto inverted = range_request("bytes=10-2");
+    REQUIRE(app->dispatch(inverted).status() == ::atria::Status::RangeNotSatisfiable);
+
+    auto beyond = range_request("bytes=999-");
+    REQUIRE(app->dispatch(beyond).status() == ::atria::Status::RangeNotSatisfiable);
+}

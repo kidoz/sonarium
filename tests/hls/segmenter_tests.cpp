@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -223,4 +224,27 @@ TEST_CASE("is_safe_rendition_id rejects the reserved .part suffix", "[hls][segme
     cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-part-suffix";
     sonarium::hls::Segmenter s{cfg};
     REQUIRE_FALSE(s.cached_file("track1.part", "index.m3u8").has_value());
+}
+
+TEST_CASE("ensure_segments surfaces ffmpeg failure and leaves no cache behind",
+          "[hls][segmenter]") {
+    if (std::system("ffmpeg -version >/dev/null 2>&1") != 0) {
+        SKIP("ffmpeg not on PATH — subprocess failure path not testable");
+    }
+    namespace fs = std::filesystem;
+    auto const root = fresh_cache_root("sonarium-ffmpeg-failure");
+    auto const bogus_source = root / "not-audio.txt";
+    std::ofstream{bogus_source, std::ios::binary} << "this is not an audio file";
+
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = root;
+    sonarium::hls::Segmenter s{cfg};
+
+    auto const result = s.ensure_segments("bogus", bogus_source);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().kind == sonarium::hls::SegmenterError::Kind::failed);
+    // Atomicity: neither a poisoned cache dir nor a .part leftover.
+    REQUIRE_FALSE(fs::exists(root / "bogus"));
+    REQUIRE_FALSE(fs::exists(root / "bogus.part"));
+    fs::remove_all(root);
 }
