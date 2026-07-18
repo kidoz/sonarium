@@ -41,4 +41,11 @@ struct ConsoleLoggerHandle {
 build_console_logger(std::string_view component_name,
                      ::logspine::level threshold = ::logspine::level::info);
 
+// Parse a log-level name ("debug", "info", "warn"/"warning", "error";
+// case-insensitive). Unknown or empty input returns `fallback` — operators
+// feed SONARIUM_LOG_LEVEL straight in.
+[[nodiscard]] ::logspine::level
+parse_log_level(std::string_view raw,
+                ::logspine::level fallback = ::logspine::level::info) noexcept;
+
 } // namespace sonarium::core

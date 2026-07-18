@@ -26,6 +26,7 @@ core_lib = static_library(
         'media_token.cpp',
         'operator_mode.cpp',
         'path_containment.cpp',
+        'env_config.cpp',
     ),
     include_directories : sonarium_inc,
     cpp_args : sonarium_common_args + sonarium_version_args,
@@ -71,4 +72,6 @@ sonarium_lint_sources += files(
     'operator_mode.cpp',
     'path_containment.hpp',
     'path_containment.cpp',
+    'env_config.hpp',
+    'env_config.cpp',
 )

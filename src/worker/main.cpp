@@ -11,8 +11,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "catalog/postgres_repository.hpp"
+#include "core/env_config.hpp"
 #include "core/version.hpp"
 #include "scanner/media_scanner.hpp"
 #include "worker/fs_watcher.hpp"
@@ -68,24 +70,16 @@ void print_report(sonarium::scanner::ScanReport const& r) {
     }
 }
 
-[[nodiscard]] std::int64_t parse_poll_interval(std::span<char* const> args) {
-    auto const flag = flag_value(args, "--interval");
-    auto const env = std::getenv("SONARIUM_WORKER_POLL_INTERVAL_SECONDS");
-    auto const* raw = flag.has_value() ? flag->c_str() : env;
-    if (raw == nullptr) {
-        return 60;
+// `--interval` flag wins over the env; malformed env values are reported via
+// `issues` (WARN — the worker has no production fail-closed gate yet).
+[[nodiscard]] std::int64_t parse_poll_interval(std::span<char* const> args,
+                                               std::vector<std::string>& issues) {
+    if (auto const flag = flag_value(args, "--interval"); flag.has_value()) {
+        auto const parsed = std::strtol(flag->c_str(), nullptr, 10);
+        return (parsed > 0) ? parsed : 60;
     }
-    auto const parsed = std::strtol(raw, nullptr, 10);
-    return (parsed > 0) ? parsed : 60;
-}
-
-[[nodiscard]] std::int64_t parse_debounce_seconds() {
-    auto const* raw = std::getenv("SONARIUM_WORKER_DEBOUNCE_SECONDS");
-    if (raw == nullptr) {
-        return 2;
-    }
-    auto const parsed = std::strtol(raw, nullptr, 10);
-    return (parsed >= 0) ? parsed : 2;
+    return sonarium::core::checked_env_int(
+        "SONARIUM_WORKER_POLL_INTERVAL_SECONDS", 60, 1, 86'400, issues);
 }
 
 } // namespace
@@ -114,7 +108,13 @@ int main(int argc, char** argv) {
 
     auto const watch = has_flag(args, "--watch");
     auto const force_polling = has_flag(args, "--poll");
-    auto const poll_seconds = parse_poll_interval(args);
+    std::vector<std::string> config_issues;
+    auto const poll_seconds = parse_poll_interval(args, config_issues);
+    auto const debounce_seconds = sonarium::core::checked_env_int(
+        "SONARIUM_WORKER_DEBOUNCE_SECONDS", 2, 0, 3600, config_issues);
+    for (auto const& issue : config_issues) {
+        std::cerr << "  WARN: " << issue << '\n';
+    }
 
     std::cout << "  root=" << root << '\n' << "  backend=postgres\n";
     if (watch) {
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
     // until the tree has been quiet for the full window, so a large library
     // copy triggers one rescan instead of one per burst. Polling backends
     // unconditionally report "changed", so debouncing them would spin.
-    auto const debounce = std::chrono::seconds{parse_debounce_seconds()};
+    auto const debounce = std::chrono::seconds{debounce_seconds};
     bool const debounce_enabled = watcher->backend_name() != "polling" && debounce.count() > 0;
 
     while (!g_stop.load(std::memory_order_relaxed)) {

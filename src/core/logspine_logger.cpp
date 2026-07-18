@@ -1,5 +1,7 @@
 #include "core/logspine_logger.hpp"
 
+#include <cctype>
+#include <cstddef>
 #include <logspine/dispatcher.hpp>
 #include <logspine/sink.hpp>
 #include <logspine/sinks/console_sink.hpp>
@@ -47,6 +49,35 @@ ConsoleLoggerHandle build_console_logger(std::string_view component_name,
     auto logger =
         std::static_pointer_cast<Logger>(std::make_shared<LogSpineLogger>(std::move(inner)));
     return ConsoleLoggerHandle{std::move(registry), std::move(logger)};
+}
+
+::logspine::level parse_log_level(std::string_view raw, ::logspine::level fallback) noexcept {
+    auto const iequals = [](std::string_view a, std::string_view b) noexcept {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(a[i]))
+                != std::tolower(static_cast<unsigned char>(b[i]))) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (iequals(raw, "debug")) {
+        return ::logspine::level::debug;
+    }
+    if (iequals(raw, "info")) {
+        return ::logspine::level::info;
+    }
+    if (iequals(raw, "warn") || iequals(raw, "warning")) {
+        return ::logspine::level::warn;
+    }
+    if (iequals(raw, "error")) {
+        return ::logspine::level::error;
+    }
+    return fallback;
 }
 
 } // namespace sonarium::core

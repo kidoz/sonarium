@@ -11,10 +11,12 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "catalog/in_memory_repository.hpp"
 #include "catalog/postgres_repository.hpp"
 #include "catalog/repository.hpp"
+#include "core/env_config.hpp"
 #include "core/media_token.hpp"
 #include "core/operator_mode.hpp"
 #include "core/version.hpp"
@@ -32,18 +34,6 @@ constexpr std::string_view default_media_base = "http://127.0.0.1:18200";
         return std::string{v};
     }
     return fallback;
-}
-
-[[nodiscard]] std::uint16_t env_port_or(std::string_view name, std::uint16_t fallback) noexcept {
-    auto const* v = std::getenv(std::string{name}.c_str());
-    if (v == nullptr) {
-        return fallback;
-    }
-    auto const parsed = std::strtoul(v, nullptr, 10);
-    if (parsed == 0 || parsed > 65535U) {
-        return fallback;
-    }
-    return static_cast<std::uint16_t>(parsed);
 }
 
 // Generate a 15-second sine-wave mp3 if it isn't already on disk. Lets the
@@ -140,8 +130,13 @@ int main() {
     std::setvbuf(stdout, nullptr, _IOLBF, 0);
 
     auto const v = sonarium::core::current_version();
+    // Malformed values are collected rather than silently defaulted: WARN in
+    // development, refuse-to-start in production (alongside the invariants).
+    std::vector<std::string> config_issues;
+    using sonarium::core::checked_env_int;
     auto const bind_host = env_or("SONARIUM_SERVER_BIND_HOST", "0.0.0.0");
-    auto const http_port = env_port_or("SONARIUM_SERVER_HTTP_PORT", default_http_port);
+    auto const http_port = static_cast<std::uint16_t>(
+        checked_env_int("SONARIUM_SERVER_HTTP_PORT", default_http_port, 1, 65535, config_issues));
     auto const media_base = env_or("SONARIUM_MEDIA_BASE_URL", std::string{default_media_base});
     auto const self_base =
         env_or("SONARIUM_SERVER_BASE_URL",
@@ -152,29 +147,15 @@ int main() {
     auto const segment_cache_root =
         env_or("SONARIUM_HLS_CACHE_DIR",
                (std::filesystem::temp_directory_path() / "sonarium-hls").string());
-    auto const segment_seconds_env = std::getenv("SONARIUM_HLS_SEGMENT_SECONDS");
     auto const segment_seconds = static_cast<std::uint32_t>(
-        (segment_seconds_env != nullptr && std::atoi(segment_seconds_env) > 0)
-            ? std::atoi(segment_seconds_env)
-            : 6);
+        checked_env_int("SONARIUM_HLS_SEGMENT_SECONDS", 6, 1, 60, config_issues));
     // Cache budget in MiB; 0 disables eviction. Default 8 GiB.
-    auto const cache_max_bytes = [] {
-        auto const* v = std::getenv("SONARIUM_HLS_CACHE_MAX_MB");
-        if (v == nullptr) {
-            return std::uint64_t{8} * 1024 * 1024 * 1024;
-        }
-        auto const parsed = std::strtoll(v, nullptr, 10);
-        return (parsed >= 0) ? static_cast<std::uint64_t>(parsed) * 1024 * 1024
-                             : std::uint64_t{8} * 1024 * 1024 * 1024;
-    }();
-    auto const max_transcodes = [] {
-        auto const* v = std::getenv("SONARIUM_HLS_MAX_TRANSCODES");
-        if (v == nullptr) {
-            return std::uint32_t{2};
-        }
-        auto const parsed = std::strtol(v, nullptr, 10);
-        return (parsed > 0) ? static_cast<std::uint32_t>(parsed) : std::uint32_t{2};
-    }();
+    auto const cache_max_bytes =
+        static_cast<std::uint64_t>(
+            checked_env_int("SONARIUM_HLS_CACHE_MAX_MB", 8192, 0, 100'000'000, config_issues))
+        * 1024 * 1024;
+    auto const max_transcodes = static_cast<std::uint32_t>(
+        checked_env_int("SONARIUM_HLS_MAX_TRANSCODES", 2, 1, 64, config_issues));
     auto segmenter = std::make_shared<sonarium::hls::Segmenter>(sonarium::hls::SegmenterConfig{
         .cache_root = std::filesystem::path{segment_cache_root},
         .segment_duration_seconds = segment_seconds,
@@ -183,14 +164,8 @@ int main() {
         .max_concurrent_transcodes = max_transcodes,
     });
     auto const token_secret = env_or("SONARIUM_MEDIA_TOKEN_SECRET", "");
-    auto const token_ttl_seconds = [&]() -> std::int64_t {
-        auto const* v = std::getenv("SONARIUM_MEDIA_TOKEN_TTL_SECONDS");
-        if (v == nullptr) {
-            return 3600;
-        }
-        auto const parsed = std::strtol(v, nullptr, 10);
-        return (parsed > 0) ? parsed : 3600;
-    }();
+    auto const token_ttl_seconds =
+        checked_env_int("SONARIUM_MEDIA_TOKEN_TTL_SECONDS", 3600, 1, 86'400 * 30, config_issues);
     auto signer = std::make_shared<sonarium::core::MediaTokenSigner>(
         token_secret, std::chrono::seconds{token_ttl_seconds});
 
@@ -203,7 +178,11 @@ int main() {
         .media_root = media_root,
         .allow_public_bind = allow_public_bind,
     });
-    auto const fatal = mode == sonarium::core::OperatorMode::production && !violations.empty();
+    auto const fatal = mode == sonarium::core::OperatorMode::production
+                       && !(violations.empty() && config_issues.empty());
+    for (auto const& issue : config_issues) {
+        std::cerr << "  " << (fatal ? "FATAL: " : "WARN: ") << issue << '\n';
+    }
     for (auto const& vio : violations) {
         std::cerr << "  " << (fatal ? "FATAL: " : "WARN: ") << vio << '\n';
     }

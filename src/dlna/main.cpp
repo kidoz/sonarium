@@ -17,6 +17,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "catalog/in_memory_repository.hpp"
 #include "catalog/postgres_repository.hpp"
@@ -25,6 +26,7 @@
 #include "composition/injector.hpp"
 #include "composition/service_config.hpp"
 #include "composition/ssdp_service.hpp"
+#include "core/env_config.hpp"
 #include "core/logspine_logger.hpp"
 #include "core/operator_mode.hpp"
 #include "core/version.hpp"
@@ -181,18 +183,6 @@ build_service_config(std::string_view advertised_host,
     return fallback;
 }
 
-[[nodiscard]] std::uint16_t env_port_or(std::string_view name, std::uint16_t fallback) noexcept {
-    auto const* v = std::getenv(std::string{name}.c_str());
-    if (v == nullptr) {
-        return fallback;
-    }
-    auto const parsed = std::strtoul(v, nullptr, 10);
-    if (parsed == 0 || parsed > 65535U) {
-        return fallback;
-    }
-    return static_cast<std::uint16_t>(parsed);
-}
-
 [[nodiscard]] bool has_flag(std::span<char* const> args, std::string_view flag) noexcept {
     for (auto const* a : args.subspan(1)) {
         if (std::strcmp(a, std::string{flag}.c_str()) == 0) {
@@ -244,11 +234,16 @@ int main(int argc, char** argv) {
     auto const v = sonarium::core::current_version();
     sonarium::dlna::DlnaConfig const app_cfg;
 
+    // Malformed values are collected rather than silently defaulted: WARN in
+    // development, refuse-to-start in production (alongside the invariants).
+    std::vector<std::string> config_issues;
     auto const bind_host = env_or("SONARIUM_DLNA_BIND_HOST", "0.0.0.0");
-    auto const http_port = env_port_or("SONARIUM_DLNA_HTTP_PORT", app_cfg.http_port);
+    auto const http_port = static_cast<std::uint16_t>(sonarium::core::checked_env_int(
+        "SONARIUM_DLNA_HTTP_PORT", app_cfg.http_port, 1, 65535, config_issues));
     auto const advertised_host = detect_advertised_host(bind_host);
 
-    auto logging = sonarium::core::build_console_logger("sonarium.dlna", ::logspine::level::info);
+    auto logging = sonarium::core::build_console_logger(
+        "sonarium.dlna", sonarium::core::parse_log_level(env_or("SONARIUM_LOG_LEVEL", "")));
     auto profiles = std::make_shared<sonarium::dlna::DeviceProfileRegistry>(
         sonarium::dlna::DeviceProfileRegistry::with_defaults());
     auto const token_secret = env_or("SONARIUM_MEDIA_TOKEN_SECRET", "");
@@ -265,7 +260,11 @@ int main(int argc, char** argv) {
         .media_root = media_root,
         .allow_public_bind = allow_public_bind,
     });
-    auto const fatal = mode == sonarium::core::OperatorMode::production && !violations.empty();
+    auto const fatal = mode == sonarium::core::OperatorMode::production
+                       && !(violations.empty() && config_issues.empty());
+    for (auto const& issue : config_issues) {
+        std::cerr << "  " << (fatal ? "FATAL: " : "WARN: ") << issue << '\n';
+    }
     for (auto const& vio : violations) {
         std::cerr << "  " << (fatal ? "FATAL: " : "WARN: ") << vio << '\n';
     }
