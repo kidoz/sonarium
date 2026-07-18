@@ -128,6 +128,42 @@ exceed the bound receive `503` with `Retry-After` instead of queueing.
 | `SONARIUM_MEDIA_ROOT`               | dlna / server / worker | Library root: containment boundary for served paths; scan root for the worker. Required in production |
 | `SONARIUM_WORKER_POLL_INTERVAL_SECONDS` | worker     | Polling fallback interval                                        |
 | `SONARIUM_WORKER_DEBOUNCE_SECONDS`  | worker         | Quiet period after FS events before rescanning (default `2`)     |
+| `SONARIUM_LOG_LEVEL`                | dlna           | Structured-log threshold: `debug`, `info`, `warn`, `error`       |
+
+Malformed numeric values (a port of `99999`, a non-numeric TTL) are reported
+at startup: `WARN` + fallback in development, refuse-to-start in production.
+
+## Deployment
+
+Two supported paths:
+
+**Docker Compose** — one image carries all four binaries; the `full` profile
+runs Postgres, the DLNA server, the HLS server, and the watch-mode worker:
+
+```bash
+SONARIUM_HOST_MUSIC=/path/to/music docker compose --profile full up --build
+```
+
+SSDP discovery from other LAN devices does not cross the default bridge
+network; on a Linux host switch the `dlna` service to `network_mode: host`
+(see the comments in `docker-compose.yaml`).
+
+**systemd** — build a release, install the binaries, and use the units under
+`packaging/systemd/`:
+
+```bash
+just setup-release && just build          # release + LTO + hardening flags
+sudo meson install -C buildDir
+sudo useradd --system sonarium
+sudo install -D -m 0600 packaging/systemd/sonarium.env.example /etc/sonarium/sonarium.env
+sudo ${EDITOR:-vi} /etc/sonarium/sonarium.env   # set secret, DSN, bind host, media root
+sudo cp packaging/systemd/*.service /etc/systemd/system/
+sudo systemctl enable --now sonarium-dlna sonarium-server sonarium-worker
+```
+
+Each HTTP service exposes `/healthz` (liveness), `/readyz` (catalog
+reachability — 503 when Postgres is down), and `/version` (includes the git
+revision the binary was built from).
 
 ## Postgres backend
 
@@ -142,7 +178,7 @@ just pg-down      # stop the container (data preserved)
 just pg-nuke      # stop + wipe the data volume
 ```
 
-Schema is created idempotently by `PostgresRepository::ensure_schema()` on first connect. There is no separate migration step yet.
+Schema is created idempotently by `PostgresRepository::ensure_schema()` on first connect, which also records the schema version in a `schema_version` table, applies any pending migrations in order, and refuses to run against a database newer than the binary.
 
 ## Development workflow
 

@@ -1,11 +1,23 @@
-# Local Postgres for Sonarium catalog integration tests.
+# Local Postgres for Sonarium catalog integration tests, plus an optional
+# "full" profile that runs the whole stack from the Dockerfile image.
 #
 #   just pg-up                   # start postgres on 127.0.0.1:5432
 #   just test-pg                 # run live tests against it
 #   just pg-down                 # stop + remove the container
 #
+#   docker compose --profile full up --build   # postgres + dlna + hls + worker
+#
+# The full profile expects the music library on the host at ./music (override
+# with SONARIUM_HOST_MUSIC) and generates dev-grade settings. SSDP discovery
+# from other LAN devices needs host networking — uncomment `network_mode` on
+# the dlna service when running on a Linux host.
+#
 # The DSN sonarium uses (matches `just test-pg`):
 #   host=127.0.0.1 port=5432 user=sonarium password=sonarium dbname=sonarium
+
+x-sonarium-env: &sonarium-env
+  SONARIUM_PG_CONNINFO: host=postgres port=5432 user=sonarium password=sonarium dbname=sonarium
+  SONARIUM_MEDIA_ROOT: /music
 
 services:
   postgres:
@@ -26,6 +38,69 @@ services:
       retries: 30
     restart: unless-stopped
 
+  dlna:
+    profiles: ["full"]
+    build: .
+    command: sonarium-dlna
+    environment:
+      <<: *sonarium-env
+      SONARIUM_DLNA_HTTP_PORT: "8200"
+      # Containers can't join LAN multicast on the default bridge network.
+      SONARIUM_DLNA_DISABLE_SSDP: "1"
+    ports:
+      - "8200:8200"
+    volumes:
+      - ${SONARIUM_HOST_MUSIC:-./music}:/music:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # network_mode: host   # Linux hosts: enables SSDP discovery (drop `ports`)
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8200/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+  hls:
+    profiles: ["full"]
+    build: .
+    command: sonarium-server
+    environment:
+      <<: *sonarium-env
+      SONARIUM_SERVER_HTTP_PORT: "18201"
+      SONARIUM_MEDIA_BASE_URL: http://dlna:8200
+      SONARIUM_HLS_CACHE_DIR: /var/cache/sonarium-hls
+    ports:
+      - "18201:18201"
+    volumes:
+      - ${SONARIUM_HOST_MUSIC:-./music}:/music:ro
+      - sonarium-hls-cache:/var/cache/sonarium-hls
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:18201/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+  worker:
+    profiles: ["full"]
+    build: .
+    command: sonarium-worker --watch --poll
+    environment:
+      <<: *sonarium-env
+    volumes:
+      - ${SONARIUM_HOST_MUSIC:-./music}:/music:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   sonarium-pg-data:
     name: sonarium-pg-data
+  sonarium-hls-cache:
+    name: sonarium-hls-cache

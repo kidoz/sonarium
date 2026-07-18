@@ -1,0 +1,27 @@
+[Unit]
+Description=Sonarium catalog import worker
+Documentation=https://github.com/kidoz/sonarium
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sonarium
+Group=sonarium
+EnvironmentFile=/etc/sonarium/sonarium.env
+ExecStart=/usr/local/bin/sonarium-worker --watch
+Restart=on-failure
+RestartSec=5
+
+# Hardening. The worker only reads the library and writes to Postgres.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadOnlyPaths=/srv/music
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,30 @@
+[Unit]
+Description=Sonarium HLS audio server
+Documentation=https://github.com/kidoz/sonarium
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sonarium
+Group=sonarium
+EnvironmentFile=/etc/sonarium/sonarium.env
+ExecStart=/usr/local/bin/sonarium-server
+Restart=on-failure
+RestartSec=5
+
+# Hardening. Only the segment cache is writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadOnlyPaths=/srv/music
+StateDirectory=sonarium
+CacheDirectory=sonarium/hls
+ReadWritePaths=/var/cache/sonarium
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+# Keep the build context lean: build trees and fetched wraps are recreated
+# inside the image (meson re-clones the pinned wrap revisions).
+buildDir/
+buildRelease/
+buildSan/
+buildTsan/
+subprojects/atria/
+subprojects/ctorwire/
+subprojects/logspine/
+subprojects/asterorm/
+subprojects/catch2/
+subprojects/packagecache/
+.idea/
+.agents/
+.claude/
+.agents-v2.9.0.bak/
+ai-agents-standards-v3.2.0/
+sonarium-ai-agent-prompts/
