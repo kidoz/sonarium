@@ -8,6 +8,7 @@ project(
         'cpp_std=c++23',
         'werror=false',
         'b_ndebug=if-release',
+        'b_pie=true',
     ],
     meson_version : '>=1.3.0',
 )
@@ -30,6 +31,25 @@ sonarium_common_args = cxx.get_supported_arguments([
     '-Wformat=2',
     '-Wimplicit-fallthrough',
 ])
+
+# Hardening for optimized builds. _FORTIFY_SOURCE needs optimization, so the
+# flags are gated on buildtype; debug builds keep fast compiles and sanitizer
+# compatibility. RELRO/now are ELF-linker features, hence Linux-only.
+sonarium_hardening_link_args = []
+if get_option('buildtype') in ['release', 'debugoptimized', 'minsize']
+    sonarium_common_args += cxx.get_supported_arguments([
+        '-fstack-protector-strong',
+        '-fstack-clash-protection',
+        '-D_FORTIFY_SOURCE=2',
+        '-D_GLIBCXX_ASSERTIONS',
+    ])
+    if host_machine.system() == 'linux'
+        sonarium_hardening_link_args = cxx.get_supported_link_arguments([
+            '-Wl,-z,relro',
+            '-Wl,-z,now',
+        ])
+    endif
+endif
 
 catch2_with_main_dep = dependency(
     'catch2-with-main',

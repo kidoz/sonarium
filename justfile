@@ -24,12 +24,13 @@ setup:
         meson setup {{build_dir}}; \
     fi
 
-# Configure Meson for release.
+# Configure Meson for release: optimized, LTO, hardening flags (see root
+# meson.build for the flag set).
 setup-release:
     if [ -d "{{build_dir}}/meson-info" ]; then \
-        meson setup --reconfigure --buildtype=release {{build_dir}}; \
+        meson setup --reconfigure --buildtype=release -Db_lto=true {{build_dir}}; \
     else \
-        meson setup --buildtype=release {{build_dir}}; \
+        meson setup --buildtype=release -Db_lto=true {{build_dir}}; \
     fi
 
 # Build everything (auto-runs setup if needed).

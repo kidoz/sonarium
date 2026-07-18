@@ -27,6 +27,7 @@ executable(
         cli_lib_dep,
     ],
     cpp_args : sonarium_common_args,
+    link_args : sonarium_hardening_link_args,
     install : true,
 )
 
