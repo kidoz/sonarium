@@ -1,5 +1,6 @@
 #include "dlna-core/browse_handler.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <span>
@@ -375,6 +376,42 @@ void apply_pagination(BrowseResult& result, std::uint32_t total_matches) {
     return result;
 }
 
+[[nodiscard]] BrowseResult browse_playlist_children(ObjectId const& oid,
+                                                    BrowseContext const& ctx,
+                                                    sonarium::catalog::PageRequest req) {
+    BrowseResult result;
+    result.update_id = ctx.catalog->system_update_id();
+    auto pl = ctx.catalog->get_playlist(oid.entity_id);
+    if (!pl.has_value()) {
+        return result;
+    }
+
+    auto ordered = pl->items;
+    std::stable_sort(ordered.begin(), ordered.end(), [](auto const& a, auto const& b) {
+        return a.position < b.position;
+    });
+
+    auto const total = static_cast<std::uint32_t>(ordered.size());
+    auto const start = std::min(req.starting_index, total);
+    auto const count =
+        (req.requested_count == 0) ? (total - start) : std::min(req.requested_count, total - start);
+
+    std::vector<DidlItem> items;
+    items.reserve(count);
+    auto const parent = make_playlist_id(oid.entity_id);
+    for (std::uint32_t i = start; i < start + count; ++i) {
+        auto t = ctx.catalog->get_track(ordered[i].track_id);
+        if (!t.has_value()) {
+            continue; // dangling playlist entry — skip rather than fault the whole Browse
+        }
+        items.push_back(build_track_item(*t, parent, ctx));
+    }
+    result.didl_lite = build_didl_lite({}, items);
+    result.number_returned = static_cast<std::uint32_t>(items.size());
+    result.total_matches = total;
+    return result;
+}
+
 [[nodiscard]] std::expected<BrowseResult, sonarium::upnp::UpnpErrorCode> browse_direct_children(
     ObjectId const& oid, BrowseContext const& ctx, sonarium::catalog::PageRequest req) {
     using sonarium::upnp::UpnpErrorCode;
@@ -408,8 +445,7 @@ void apply_pagination(BrowseResult& result, std::uint32_t total_matches) {
             if (!ctx.catalog->get_playlist(oid.entity_id).has_value()) {
                 return std::unexpected(UpnpErrorCode::no_such_object);
             }
-            // Treating playlist as a leaf without expanded child track list for the MVP.
-            return browse_artist_children(oid, ctx, req);
+            return browse_playlist_children(oid, ctx, req);
         case ObjectIdKind::track:
             // Tracks have no direct children — return empty result.
             return BrowseResult{};
