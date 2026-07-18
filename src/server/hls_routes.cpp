@@ -104,10 +104,27 @@ void register_hls_routes(::atria::Application& app,
     // GET /version — basic liveness/identity probe.
     app.get("/version", [self = self_base_url](::atria::Request&) {
         auto const v = sonarium::core::current_version();
-        return ::atria::Response::text(std::string{sonarium::core::product_name()} + " server "
-                                       + std::to_string(v.major) + '.' + std::to_string(v.minor)
-                                       + '.' + std::to_string(v.patch) + " (HLS)\n" + "self=" + self
-                                       + "\n");
+        return ::atria::Response::text(
+            std::string{sonarium::core::product_name()} + " server " + std::to_string(v.major) + '.'
+            + std::to_string(v.minor) + '.' + std::to_string(v.patch) + " ("
+            + std::string{sonarium::core::git_revision()} + ") (HLS)\n" + "self=" + self + "\n");
+    });
+
+    // GET /healthz — liveness: the process is up and serving HTTP.
+    app.get("/healthz", [](::atria::Request&) { return ::atria::Response::text("ok\n"); });
+
+    // GET /readyz — readiness: the catalog backend answers queries. A dropped
+    // Postgres connection turns this into 503 so orchestrators stop routing.
+    app.get("/readyz", [catalog](::atria::Request&) -> ::atria::Response {
+        try {
+            (void)catalog->system_update_id();
+            return ::atria::Response::text("ready\n");
+        } catch (std::exception const& e) {
+            // atria's Status enum has no 503; clients act on the numeric code.
+            ::atria::Response r{static_cast<::atria::Status>(503)};
+            r.set_body(std::string{"catalog unavailable: "} + e.what() + "\n");
+            return r;
+        }
     });
 
     // GET /hls/tracks/{id}/master.m3u8 — multi-variant master playlist.

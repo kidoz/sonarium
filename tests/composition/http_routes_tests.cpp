@@ -456,3 +456,20 @@ TEST_CASE("Malformed and unsatisfiable Range headers return 416", "[composition]
     auto beyond = range_request("bytes=999-");
     REQUIRE(app->dispatch(beyond).status() == ::atria::Status::RangeNotSatisfiable);
 }
+
+TEST_CASE("Operational probes respond on the DLNA server", "[composition][http]") {
+    auto app = build_app();
+
+    auto version_req = make_request(::atria::Method::Get, "/version");
+    auto const version_res = app->dispatch(version_req);
+    REQUIRE(version_res.status() == ::atria::Status::Ok);
+    REQUIRE(version_res.body().find("Sonarium DLNA") != std::string::npos);
+
+    auto health_req = make_request(::atria::Method::Get, "/healthz");
+    REQUIRE(app->dispatch(health_req).status() == ::atria::Status::Ok);
+
+    auto ready_req = make_request(::atria::Method::Get, "/readyz");
+    auto const ready_res = app->dispatch(ready_req);
+    REQUIRE(ready_res.status() == ::atria::Status::Ok);
+    REQUIRE(ready_res.body() == "ready\n");
+}

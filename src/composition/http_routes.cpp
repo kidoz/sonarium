@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "core/path_containment.hpp"
+#include "core/version.hpp"
 #include "media/mime_type.hpp"
 
 namespace sonarium::composition {
@@ -70,6 +71,32 @@ namespace {
 void register_dlna_routes(::atria::Application& app,
                           std::shared_ptr<DlnaServer const> server,
                           std::shared_ptr<sonarium::catalog::Repository const> catalog) {
+    // GET /version — identity probe, mirrors the HLS server's endpoint.
+    app.get("/version", [](::atria::Request&) {
+        auto const v = sonarium::core::current_version();
+        return ::atria::Response::text(std::string{sonarium::core::product_name()} + " DLNA "
+                                       + std::to_string(v.major) + '.' + std::to_string(v.minor)
+                                       + '.' + std::to_string(v.patch) + " ("
+                                       + std::string{sonarium::core::git_revision()} + ")\n");
+    });
+
+    // GET /healthz — liveness: the process is up and serving HTTP.
+    app.get("/healthz", [](::atria::Request&) { return ::atria::Response::text("ok\n"); });
+
+    // GET /readyz — readiness: the catalog backend answers queries. A dropped
+    // Postgres connection turns this into 503 so orchestrators stop routing.
+    app.get("/readyz", [catalog](::atria::Request&) -> ::atria::Response {
+        try {
+            (void)catalog->system_update_id();
+            return ::atria::Response::text("ready\n");
+        } catch (std::exception const& e) {
+            // atria's Status enum has no 503; clients act on the numeric code.
+            ::atria::Response r{static_cast<::atria::Status>(503)};
+            r.set_body(std::string{"catalog unavailable: "} + e.what() + "\n");
+            return r;
+        }
+    });
+
     // GET /description.xml
     app.get("/description.xml",
             [server](::atria::Request& /*req*/) { return xml_ok(server->description_xml()); })

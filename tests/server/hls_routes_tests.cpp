@@ -10,10 +10,12 @@
 #include <fstream>
 #include <ios>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "catalog/in_memory_repository.hpp"
 #include "core/media_token.hpp"
@@ -227,4 +229,100 @@ TEST_CASE("cached segments are served with Range support", "[server][hls_routes]
     auto missing = make_get("/hls/renditions/r1/seg00042.ts");
     REQUIRE(ctx.app->dispatch(missing).status() == ::atria::Status::NotFound);
     fs::remove_all(cache_root);
+}
+
+namespace {
+
+// Repository stub whose backend is permanently down — every call throws the
+// error the Postgres implementation raises on a dead connection.
+class DownRepository final : public sonarium::catalog::Repository {
+public:
+    [[nodiscard]] std::uint32_t system_update_id() const override { throw_down(); }
+    [[nodiscard]] sonarium::catalog::Page<sonarium::catalog::Artist>
+    list_artists(sonarium::catalog::PageRequest) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::optional<sonarium::catalog::Artist>
+    get_artist(std::string_view) const override {
+        throw_down();
+    }
+    [[nodiscard]] sonarium::catalog::Page<sonarium::catalog::Album>
+    list_albums_for_artist(std::string_view, sonarium::catalog::PageRequest) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::optional<sonarium::catalog::Album>
+    get_album(std::string_view) const override {
+        throw_down();
+    }
+    [[nodiscard]] sonarium::catalog::Page<sonarium::catalog::Track>
+    list_tracks_for_album(std::string_view, sonarium::catalog::PageRequest) const override {
+        throw_down();
+    }
+    [[nodiscard]] sonarium::catalog::Page<sonarium::catalog::Track>
+    list_all_tracks(sonarium::catalog::PageRequest) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::optional<sonarium::catalog::Track>
+    get_track(std::string_view) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::vector<sonarium::media::MediaRendition>
+    list_renditions_for_track(std::string_view) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::optional<sonarium::media::MediaRendition>
+    get_rendition(std::string_view) const override {
+        throw_down();
+    }
+    [[nodiscard]] sonarium::catalog::Page<sonarium::catalog::Playlist>
+    list_playlists(sonarium::catalog::PageRequest) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::optional<sonarium::catalog::Playlist>
+    get_playlist(std::string_view) const override {
+        throw_down();
+    }
+    [[nodiscard]] std::optional<sonarium::catalog::StorageAsset>
+    get_asset(std::string_view) const override {
+        throw_down();
+    }
+
+private:
+    [[noreturn]] static void throw_down() {
+        throw sonarium::catalog::RepositoryError{"postgres: connection lost"};
+    }
+};
+
+} // namespace
+
+TEST_CASE("readiness reflects catalog availability", "[server][hls_routes]") {
+    auto ctx = make_app(repo_with_rendition("r1", ""), disabled_signer());
+
+    auto health = make_get("/healthz");
+    REQUIRE(ctx.app->dispatch(health).status() == ::atria::Status::Ok);
+
+    auto ready = make_get("/readyz");
+    REQUIRE(ctx.app->dispatch(ready).status() == ::atria::Status::Ok);
+
+    // Same routes with a dead backend: alive but not ready.
+    auto down_repo = std::make_shared<DownRepository>();
+    SegmenterConfig seg_cfg;
+    seg_cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-readyz-cache";
+    auto down_app = std::make_unique<::atria::Application>();
+    register_hls_routes(
+        *down_app,
+        std::const_pointer_cast<Repository const>(std::static_pointer_cast<Repository>(down_repo)),
+        disabled_signer(),
+        std::make_shared<Segmenter>(seg_cfg),
+        HlsRoutesConfig{.media_base_url = std::string{media_base},
+                        .self_base_url = std::string{self_base},
+                        .media_root = {}});
+
+    auto down_health = make_get("/healthz");
+    REQUIRE(down_app->dispatch(down_health).status() == ::atria::Status::Ok);
+
+    auto down_ready = make_get("/readyz");
+    auto const res = down_app->dispatch(down_ready);
+    REQUIRE(static_cast<std::uint16_t>(res.status()) == 503);
+    REQUIRE(res.body().find("catalog unavailable") != std::string::npos);
 }
