@@ -328,3 +328,20 @@ wraps-status:
 # Re-fetch the wrapped subprojects (clones + reconfigure).
 wraps-refresh: distclean setup
     @echo "✓ wraps refreshed"
+
+# ---------------------------------------------------------------------------
+# AI agent standards (.agents/)
+# ---------------------------------------------------------------------------
+
+# Validate the canonical .agents tree against the vendored standard (v3.2.0).
+# Stages .agents + root entrypoints in a temp dir so vendored deps, host
+# wrapper dirs (.claude/), and backups don't produce false findings.
+standards-validate:
+    @rm -rf /tmp/sonarium-standards-check && mkdir -p /tmp/sonarium-standards-check
+    @cp -a .agents AGENTS.md CLAUDE.md /tmp/sonarium-standards-check/
+    PYTHONDONTWRITEBYTECODE=1 python3 .agents/tools/validate_standards_package.py \
+        --root /tmp/sonarium-standards-check --mode strict-governance --consumer
+
+# Regenerate .claude/skills/** wrappers from canonical .agents/skills/**.
+standards-sync-claude:
+    PYTHONDONTWRITEBYTECODE=1 python3 .agents/tools/sync_claude_skill_adapters.py --clean
