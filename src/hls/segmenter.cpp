@@ -9,6 +9,8 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -59,6 +61,9 @@ namespace {
     if (id.empty() || id.size() > 256) {
         return false;
     }
+    if (id.ends_with(".part")) {
+        return false; // reserved for in-progress segmenter output dirs
+    }
     for (char const c : id) {
         bool const ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
                         || c == '-' || c == '_' || c == ':' || c == '.';
@@ -106,6 +111,19 @@ namespace {
         return std::unexpected("ffmpeg killed by signal");
     }
     return WEXITSTATUS(status);
+}
+
+// A cached playlist is only complete once ffmpeg has appended the VOD
+// terminator. A truncated index.m3u8 (ffmpeg killed mid-transcode, disk full)
+// must read as absent, or the fast path would serve it forever.
+[[nodiscard]] bool playlist_is_complete(std::filesystem::path const& playlist) {
+    std::ifstream in{playlist, std::ios::binary};
+    if (!in) {
+        return false;
+    }
+    std::string const contents{std::istreambuf_iterator<char>{in},
+                               std::istreambuf_iterator<char>{}};
+    return contents.find("#EXT-X-ENDLIST") != std::string::npos;
 }
 
 } // namespace
@@ -182,9 +200,10 @@ Segmenter::ensure_segments(std::string const& rendition_id,
     auto const playlist = dir / "index.m3u8";
 
     // Fast path: already segmented. No lock needed for the read — worst case
-    // we double-check under the lock below.
+    // we double-check under the lock below. The ENDLIST check guards against
+    // caches written by pre-atomic versions or a crash between rename steps.
     std::error_code ec;
-    if (std::filesystem::exists(playlist, ec)) {
+    if (std::filesystem::exists(playlist, ec) && playlist_is_complete(playlist)) {
         return playlist;
     }
 
@@ -193,28 +212,51 @@ Segmenter::ensure_segments(std::string const& rendition_id,
 
     // Re-check under lock (another thread may have raced ahead).
     if (std::filesystem::exists(playlist, ec)) {
-        return playlist;
+        if (playlist_is_complete(playlist)) {
+            return playlist;
+        }
+        // Truncated leftover — rebuild from scratch.
+        std::filesystem::remove_all(dir, ec);
     }
 
     if (!std::filesystem::exists(source_path, ec)) {
         return std::unexpected("source not found: " + source_path.string());
     }
 
-    std::filesystem::create_directories(dir, ec);
+    // Segment into a sibling .part dir and rename into place on success, so a
+    // failed or killed ffmpeg can never leave a half-written cache behind.
+    // Segment filenames inside index.m3u8 are relative, so the rename keeps
+    // the playlist valid.
+    auto const part_dir = std::filesystem::path{dir.string() + ".part"};
+    std::filesystem::remove_all(part_dir, ec);
+    std::filesystem::create_directories(part_dir, ec);
     if (ec) {
         return std::unexpected("create_directories: " + ec.message());
     }
 
-    auto const argv = build_segmenter_argv(source_path, dir, config_, bitrate_kbps_override);
+    auto const fail = [&part_dir](std::string message) {
+        std::error_code cleanup_ec;
+        std::filesystem::remove_all(part_dir, cleanup_ec);
+        return std::unexpected(std::move(message));
+    };
+
+    auto const argv = build_segmenter_argv(source_path, part_dir, config_, bitrate_kbps_override);
     auto status = spawn_and_wait(argv);
     if (!status.has_value()) {
-        return std::unexpected(status.error());
+        return fail(status.error());
     }
     if (*status != 0) {
-        return std::unexpected("ffmpeg exited " + std::to_string(*status));
+        return fail("ffmpeg exited " + std::to_string(*status));
     }
-    if (!std::filesystem::exists(playlist, ec)) {
-        return std::unexpected("ffmpeg succeeded but playlist is missing: " + playlist.string());
+    if (!playlist_is_complete(part_dir / "index.m3u8")) {
+        return fail("ffmpeg succeeded but playlist is missing or truncated: "
+                    + (part_dir / "index.m3u8").string());
+    }
+
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::rename(part_dir, dir, ec);
+    if (ec) {
+        return fail("rename cache dir: " + ec.message());
     }
     return playlist;
 }
