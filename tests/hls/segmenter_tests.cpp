@@ -1,6 +1,9 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -109,4 +112,115 @@ TEST_CASE("Segmenter::cached_file returns nullopt when file is absent", "[hls][s
     cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-test-cache-absent";
     sonarium::hls::Segmenter s{cfg};
     REQUIRE_FALSE(s.cached_file("track1", "seg00001.ts").has_value());
+}
+
+namespace {
+
+// Build a fake cached rendition dir: a complete index.m3u8 plus one segment
+// file of `payload_bytes`, with the playlist mtime pushed `age` into the past
+// so LRU ordering is deterministic.
+void seed_cache_entry(std::filesystem::path const& cache_root,
+                      std::string const& rendition_id,
+                      std::size_t payload_bytes,
+                      std::chrono::minutes age) {
+    namespace fs = std::filesystem;
+    auto const dir = cache_root / rendition_id;
+    fs::create_directories(dir);
+    {
+        std::ofstream playlist{dir / "index.m3u8", std::ios::binary};
+        playlist << "#EXTM3U\n#EXTINF:6.0,\nseg00000.ts\n#EXT-X-ENDLIST\n";
+    }
+    {
+        std::ofstream segment{dir / "seg00000.ts", std::ios::binary};
+        segment << std::string(payload_bytes, 'x');
+    }
+    fs::last_write_time(dir / "index.m3u8", fs::file_time_type::clock::now() - age);
+}
+
+[[nodiscard]] std::filesystem::path fresh_cache_root(std::string const& name) {
+    auto const root = std::filesystem::temp_directory_path() / name;
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    return root;
+}
+
+} // namespace
+
+TEST_CASE("evict_over_cap removes least-recently-used renditions first", "[hls][segmenter]") {
+    auto const root = fresh_cache_root("sonarium-evict-lru");
+    seed_cache_entry(root, "oldest", 1000, std::chrono::minutes{30});
+    seed_cache_entry(root, "middle", 1000, std::chrono::minutes{20});
+    seed_cache_entry(root, "newest", 1000, std::chrono::minutes{10});
+
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = root;
+    cfg.max_cache_bytes = 2500; // fits two entries, not three
+    sonarium::hls::Segmenter s{cfg};
+
+    s.evict_over_cap();
+
+    REQUIRE_FALSE(std::filesystem::exists(root / "oldest"));
+    REQUIRE(std::filesystem::exists(root / "middle"));
+    REQUIRE(std::filesystem::exists(root / "newest"));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("evict_over_cap never evicts the rendition it was asked to keep", "[hls][segmenter]") {
+    auto const root = fresh_cache_root("sonarium-evict-keep");
+    seed_cache_entry(root, "keep-me", 1000, std::chrono::minutes{30}); // oldest
+    seed_cache_entry(root, "other", 1000, std::chrono::minutes{10});
+
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = root;
+    cfg.max_cache_bytes = 1500; // fits one entry
+    sonarium::hls::Segmenter s{cfg};
+
+    s.evict_over_cap("keep-me");
+
+    REQUIRE(std::filesystem::exists(root / "keep-me"));
+    REQUIRE_FALSE(std::filesystem::exists(root / "other"));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("evict_over_cap with zero cap is a no-op", "[hls][segmenter]") {
+    auto const root = fresh_cache_root("sonarium-evict-nocap");
+    seed_cache_entry(root, "a", 5000, std::chrono::minutes{30});
+
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = root;
+    cfg.max_cache_bytes = 0;
+    sonarium::hls::Segmenter s{cfg};
+
+    s.evict_over_cap();
+
+    REQUIRE(std::filesystem::exists(root / "a"));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("evict_over_cap removes stale .part leftovers but spares fresh ones",
+          "[hls][segmenter]") {
+    namespace fs = std::filesystem;
+    auto const root = fresh_cache_root("sonarium-evict-part");
+    fs::create_directories(root / "crashed.part");
+    fs::last_write_time(root / "crashed.part",
+                        fs::file_time_type::clock::now() - std::chrono::hours{2});
+    fs::create_directories(root / "active.part");
+
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = root;
+    cfg.max_cache_bytes = 1; // force the sweep to run
+    sonarium::hls::Segmenter s{cfg};
+
+    s.evict_over_cap();
+
+    REQUIRE_FALSE(fs::exists(root / "crashed.part"));
+    REQUIRE(fs::exists(root / "active.part"));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("is_safe_rendition_id rejects the reserved .part suffix", "[hls][segmenter]") {
+    sonarium::hls::SegmenterConfig cfg;
+    cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-part-suffix";
+    sonarium::hls::Segmenter s{cfg};
+    REQUIRE_FALSE(s.cached_file("track1.part", "index.m3u8").has_value());
 }

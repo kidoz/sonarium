@@ -306,8 +306,16 @@ void register_hls_routes(::atria::Application& app,
                 auto playlist_path = segmenter->ensure_segments(
                     std::string{id}, rendition->storage_path, per_rendition_kbps);
                 if (!playlist_path.has_value()) {
+                    if (playlist_path.error().kind == sonarium::hls::SegmenterError::Kind::busy) {
+                        // atria's Status enum has no 503; the numeric code is
+                        // what clients act on, so cast it in.
+                        ::atria::Response r{static_cast<::atria::Status>(503)};
+                        r.set_header("Retry-After", "2");
+                        r.set_body("segmenter busy: " + playlist_path.error().message + "\n");
+                        return r;
+                    }
                     ::atria::Response r{::atria::Status::InternalServerError};
-                    r.set_body("segmenter: " + playlist_path.error() + "\n");
+                    r.set_body("segmenter: " + playlist_path.error().message + "\n");
                     return r;
                 }
                 auto body = read_file(*playlist_path);
@@ -368,10 +376,30 @@ int main() {
         (segment_seconds_env != nullptr && std::atoi(segment_seconds_env) > 0)
             ? std::atoi(segment_seconds_env)
             : 6);
+    // Cache budget in MiB; 0 disables eviction. Default 8 GiB.
+    auto const cache_max_bytes = [] {
+        auto const* v = std::getenv("SONARIUM_HLS_CACHE_MAX_MB");
+        if (v == nullptr) {
+            return std::uint64_t{8} * 1024 * 1024 * 1024;
+        }
+        auto const parsed = std::strtoll(v, nullptr, 10);
+        return (parsed >= 0) ? static_cast<std::uint64_t>(parsed) * 1024 * 1024
+                             : std::uint64_t{8} * 1024 * 1024 * 1024;
+    }();
+    auto const max_transcodes = [] {
+        auto const* v = std::getenv("SONARIUM_HLS_MAX_TRANSCODES");
+        if (v == nullptr) {
+            return std::uint32_t{2};
+        }
+        auto const parsed = std::strtol(v, nullptr, 10);
+        return (parsed > 0) ? static_cast<std::uint32_t>(parsed) : std::uint32_t{2};
+    }();
     auto segmenter = std::make_shared<sonarium::hls::Segmenter>(sonarium::hls::SegmenterConfig{
         .cache_root = std::filesystem::path{segment_cache_root},
         .segment_duration_seconds = segment_seconds,
         .bitrate_kbps = 192,
+        .max_cache_bytes = cache_max_bytes,
+        .max_concurrent_transcodes = max_transcodes,
     });
     auto const token_secret = env_or("SONARIUM_MEDIA_TOKEN_SECRET", "");
     auto const token_ttl_seconds = [&]() -> std::int64_t {
@@ -432,7 +460,11 @@ int main() {
               << "  catalog=" << catalog_kind << '\n'
               << "  media_root=" << (media_root.empty() ? "<unset — containment off>" : media_root)
               << '\n'
-              << "  hls_cache=" << segment_cache_root << " (segments=" << segment_seconds << "s)\n"
+              << "  hls_cache=" << segment_cache_root << " (segments=" << segment_seconds
+              << "s, cap="
+              << (cache_max_bytes == 0 ? "unbounded"
+                                       : std::to_string(cache_max_bytes / (1024 * 1024)) + "MiB")
+              << ", transcodes<=" << max_transcodes << ")\n"
               << "  media_tokens=" << (signer->enabled() ? "enabled" : "disabled");
     if (signer->enabled()) {
         std::cout << " ttl=" << token_ttl_seconds << "s";
@@ -456,7 +488,9 @@ int main() {
     ::atria::ServerConfig cfg;
     cfg.host = bind_host;
     cfg.port = http_port;
-    cfg.worker_threads = 2;
+    // Enough headroom that the bounded transcode slots can block their own
+    // requests without starving playlist/segment traffic.
+    cfg.worker_threads = 8;
     auto const rc = app.listen(cfg);
     g_shutdown_app.store(nullptr);
     std::cout << "  server stopped\n";
