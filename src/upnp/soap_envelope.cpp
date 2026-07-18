@@ -1,5 +1,6 @@
 #include "upnp/soap_envelope.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <optional>
@@ -93,6 +94,30 @@ namespace {
         }
         return s;
     }
+}
+
+// Meters total characters scanned across one parse. `locate_body` and the
+// per-element `find_close` calls re-scan spans, which crafted input can push
+// toward O(n²); the budget bounds the damage. A legitimate envelope costs a
+// small multiple of its size, so the limit is far above real traffic.
+struct ParseBudget {
+    std::size_t remaining;
+
+    [[nodiscard]] bool charge(std::size_t n) noexcept {
+        if (remaining < n) {
+            remaining = 0;
+            return false;
+        }
+        remaining -= n;
+        return true;
+    }
+
+    [[nodiscard]] bool exhausted() const noexcept { return remaining == 0; }
+};
+
+[[nodiscard]] std::size_t scan_budget_for(std::size_t body_size) noexcept {
+    constexpr std::size_t minimum = std::size_t{1} << 20; // small bodies get a generous floor
+    return std::max(minimum, body_size * 8);
 }
 
 struct OpenTag {
@@ -200,19 +225,19 @@ struct OpenTag {
 }
 
 // Find the next opening element after `pos`, skipping whitespace, comments, text.
-[[nodiscard]] std::optional<OpenTag> next_element(std::string_view s, std::size_t& pos) noexcept {
+[[nodiscard]] std::optional<OpenTag>
+next_element(std::string_view s, std::size_t& pos, ParseBudget& budget) noexcept {
     while (pos < s.size()) {
-        if (is_space(s[pos])) {
-            ++pos;
-            continue;
-        }
-        if (s[pos] != '<') {
+        if (is_space(s[pos]) || s[pos] != '<') {
+            if (!budget.charge(1)) {
+                return std::nullopt;
+            }
             ++pos;
             continue;
         }
         if (s.substr(pos).starts_with("<!--")) {
             auto const end = s.find("-->", pos);
-            if (end == std::string_view::npos) {
+            if (end == std::string_view::npos || !budget.charge(end + 3 - pos)) {
                 return std::nullopt;
             }
             pos = end + 3;
@@ -221,7 +246,7 @@ struct OpenTag {
         if (s.substr(pos).starts_with("<![CDATA[")) {
             // CDATA at this level can only appear as text — skip.
             auto const end = s.find("]]>", pos);
-            if (end == std::string_view::npos) {
+            if (end == std::string_view::npos || !budget.charge(end + 3 - pos)) {
                 return std::nullopt;
             }
             pos = end + 3;
@@ -230,7 +255,11 @@ struct OpenTag {
         if (s[pos + 1] == '/') {
             return std::nullopt; // end tag
         }
-        return read_open_tag(s, pos);
+        auto tag = read_open_tag(s, pos);
+        if (tag.has_value() && !budget.charge(tag->end_offset - pos)) {
+            return std::nullopt;
+        }
+        return tag;
     }
     return std::nullopt;
 }
@@ -238,18 +267,23 @@ struct OpenTag {
 // Find matching closing tag for an open tag with `qname` starting at `from`.
 // Returns the position of the `<` of the closing tag (so the inner span is
 // [from, returned_pos)). Tracks nested opens of the same qname.
-[[nodiscard]] std::size_t
-find_close(std::string_view s, std::string_view qname, std::size_t from) noexcept {
+[[nodiscard]] std::size_t find_close(std::string_view s,
+                                     std::string_view qname,
+                                     std::size_t from,
+                                     ParseBudget& budget) noexcept {
     int depth = 1;
     std::size_t i = from;
     while (i < s.size()) {
         if (s[i] != '<') {
+            if (!budget.charge(1)) {
+                return std::string_view::npos;
+            }
             ++i;
             continue;
         }
         if (s.substr(i).starts_with("<!--")) {
             auto const end = s.find("-->", i);
-            if (end == std::string_view::npos) {
+            if (end == std::string_view::npos || !budget.charge(end + 3 - i)) {
                 return std::string_view::npos;
             }
             i = end + 3;
@@ -257,7 +291,7 @@ find_close(std::string_view s, std::string_view qname, std::size_t from) noexcep
         }
         if (s.substr(i).starts_with("<![CDATA[")) {
             auto const end = s.find("]]>", i);
-            if (end == std::string_view::npos) {
+            if (end == std::string_view::npos || !budget.charge(end + 3 - i)) {
                 return std::string_view::npos;
             }
             i = end + 3;
@@ -266,7 +300,7 @@ find_close(std::string_view s, std::string_view qname, std::size_t from) noexcep
         if (s[i + 1] == '/') {
             // </qname>
             auto const close = find_tag_close(s, i);
-            if (close == std::string_view::npos) {
+            if (close == std::string_view::npos || !budget.charge(close + 1 - i)) {
                 return std::string_view::npos;
             }
             auto const inside = s.substr(i + 2, close - (i + 2));
@@ -288,11 +322,17 @@ find_close(std::string_view s, std::string_view qname, std::size_t from) noexcep
             continue;
         }
         if (auto opened = read_open_tag(s, i); opened) {
+            if (!budget.charge(opened->end_offset - i)) {
+                return std::string_view::npos;
+            }
             if (opened->qname == qname && !opened->self_closing) {
                 ++depth;
             }
             i = opened->end_offset;
             continue;
+        }
+        if (!budget.charge(1)) {
+            return std::string_view::npos;
         }
         ++i;
     }
@@ -355,17 +395,19 @@ find_close(std::string_view s, std::string_view qname, std::size_t from) noexcep
 
 // Find the `Body` element (any namespace prefix) inside the envelope content.
 [[nodiscard]] std::expected<std::pair<std::size_t, std::string_view>, SoapParseError>
-locate_body(std::string_view envelope_inner) {
+locate_body(std::string_view envelope_inner, ParseBudget& budget) {
     std::size_t pos = 0;
     while (true) {
-        auto el = next_element(envelope_inner, pos);
+        auto el = next_element(envelope_inner, pos, budget);
         if (!el) {
-            return std::unexpected(SoapParseError::body_not_found);
+            return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                      : SoapParseError::body_not_found);
         }
         if (local_name(el->qname) == "Body" || local_name(el->qname) == "body") {
-            auto const body_close = find_close(envelope_inner, el->qname, el->end_offset);
+            auto const body_close = find_close(envelope_inner, el->qname, el->end_offset, budget);
             if (body_close == std::string_view::npos) {
-                return std::unexpected(SoapParseError::malformed);
+                return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                          : SoapParseError::malformed);
             }
             auto const body_inner =
                 envelope_inner.substr(el->end_offset, body_close - el->end_offset);
@@ -375,9 +417,10 @@ locate_body(std::string_view envelope_inner) {
         if (el->self_closing) {
             pos = el->end_offset;
         } else {
-            auto const close = find_close(envelope_inner, el->qname, el->end_offset);
+            auto const close = find_close(envelope_inner, el->qname, el->end_offset, budget);
             if (close == std::string_view::npos) {
-                return std::unexpected(SoapParseError::malformed);
+                return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                          : SoapParseError::malformed);
             }
             pos = close;
             // Move past closing tag too.
@@ -392,7 +435,8 @@ locate_body(std::string_view envelope_inner) {
 
 } // namespace
 
-std::expected<ParsedSoapRequest, SoapParseError> parse_soap_request(std::string_view body) {
+std::expected<ParsedSoapRequest, SoapParseError> parse_soap_request(std::string_view body,
+                                                                    std::size_t max_scan_chars) {
     auto stripped = skip_meta(body);
     if (stripped.empty()) {
         return std::unexpected(SoapParseError::empty);
@@ -409,22 +453,26 @@ std::expected<ParsedSoapRequest, SoapParseError> parse_soap_request(std::string_
         return std::unexpected(SoapParseError::body_not_found);
     }
 
-    auto const env_close = find_close(stripped, envelope->qname, envelope->end_offset);
+    ParseBudget budget{max_scan_chars > 0 ? max_scan_chars : scan_budget_for(body.size())};
+
+    auto const env_close = find_close(stripped, envelope->qname, envelope->end_offset, budget);
     if (env_close == std::string_view::npos) {
-        return std::unexpected(SoapParseError::malformed);
+        return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                  : SoapParseError::malformed);
     }
     auto const env_inner = stripped.substr(envelope->end_offset, env_close - envelope->end_offset);
 
-    auto body_lookup = locate_body(env_inner);
+    auto body_lookup = locate_body(env_inner, budget);
     if (!body_lookup) {
         return std::unexpected(body_lookup.error());
     }
     auto const body_inner = body_lookup->second;
 
     std::size_t bp = 0;
-    auto action = next_element(body_inner, bp);
+    auto action = next_element(body_inner, bp, budget);
     if (!action) {
-        return std::unexpected(SoapParseError::action_not_found);
+        return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                  : SoapParseError::action_not_found);
     }
 
     auto const ns_lookup = find_xmlns(action->inside, prefix_of(action->qname));
@@ -441,25 +489,30 @@ std::expected<ParsedSoapRequest, SoapParseError> parse_soap_request(std::string_
         return out;
     }
 
-    auto const action_close = find_close(body_inner, action->qname, action->end_offset);
+    auto const action_close = find_close(body_inner, action->qname, action->end_offset, budget);
     if (action_close == std::string_view::npos) {
-        return std::unexpected(SoapParseError::malformed);
+        return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                  : SoapParseError::malformed);
     }
     auto const action_inner =
         body_inner.substr(action->end_offset, action_close - action->end_offset);
 
     std::size_t ap = 0;
     while (true) {
-        auto arg = next_element(action_inner, ap);
+        auto arg = next_element(action_inner, ap, budget);
         if (!arg) {
+            if (budget.exhausted()) {
+                return std::unexpected(SoapParseError::too_complex);
+            }
             break;
         }
         auto const arg_local = local_name(arg->qname);
         std::string value;
         if (!arg->self_closing) {
-            auto const arg_close = find_close(action_inner, arg->qname, arg->end_offset);
+            auto const arg_close = find_close(action_inner, arg->qname, arg->end_offset, budget);
             if (arg_close == std::string_view::npos) {
-                return std::unexpected(SoapParseError::malformed);
+                return std::unexpected(budget.exhausted() ? SoapParseError::too_complex
+                                                          : SoapParseError::malformed);
             }
             auto const text = action_inner.substr(arg->end_offset, arg_close - arg->end_offset);
             value = xml_unescape(inner_text(text));

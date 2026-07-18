@@ -152,3 +152,23 @@ TEST_CASE("Round trip: parse then build", "[upnp][soap_envelope]") {
     REQUIRE(re->action == "BrowseResponse");
     REQUIRE(re->arg_or("NumberReturned", "") == "0");
 }
+
+TEST_CASE("Parser rejects input exceeding the scan-work budget", "[upnp][soap_envelope]") {
+    // A tiny explicit budget forces exhaustion on an otherwise valid request —
+    // exercising the guard that bounds CPU on crafted control-endpoint bodies.
+    auto const r = parse_soap_request(browse_request, /*max_scan_chars=*/16);
+    REQUIRE_FALSE(r.has_value());
+    REQUIRE(r.error() == SoapParseError::too_complex);
+}
+
+TEST_CASE("Default scan budget admits large legitimate envelopes", "[upnp][soap_envelope]") {
+    // Pad a valid Browse request with a large comment to confirm real traffic
+    // never trips the budget.
+    std::string padded{browse_request};
+    auto const insert_at = padded.find("<s:Body>");
+    REQUIRE(insert_at != std::string::npos);
+    padded.insert(insert_at, "<!--" + std::string(200'000, 'x') + "-->");
+    auto const r = parse_soap_request(padded);
+    REQUIRE(r.has_value());
+    REQUIRE(r->action == "Browse");
+}

@@ -42,13 +42,20 @@ enum class SoapParseError : std::uint8_t {
     action_not_found,
     malformed,
     namespace_missing,
+    // The parser's scan-work budget ran out — crafted nesting/comment layouts
+    // can otherwise push the hand-rolled parser toward O(n²) CPU on the
+    // unauthenticated control endpoint. Legitimate envelopes never hit this.
+    too_complex,
 };
 
 // Parse a UPnP SOAP envelope body. Tolerates BOM, XML declarations, comments, mixed-case
 // element names, namespace prefixes, attribute reordering, and reasonable whitespace.
 // Does NOT support nested arg elements; UPnP control args are flat scalars.
+//
+// `max_scan_chars` caps the parser's total scan work (0 = default: a generous
+// multiple of the body size). Exceeding it yields SoapParseError::too_complex.
 [[nodiscard]] std::expected<ParsedSoapRequest, SoapParseError>
-parse_soap_request(std::string_view body);
+parse_soap_request(std::string_view body, std::size_t max_scan_chars = 0);
 
 // Build a SOAP response envelope for `action` in `service_urn`.
 // Each (name, value) is emitted as <name>value</name>; values are XML-escaped.
