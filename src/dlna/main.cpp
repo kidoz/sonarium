@@ -164,6 +164,12 @@ build_service_config(std::string_view advertised_host,
     return std::string{bind_host};
 }
 
+// True for hosts that only resolve to the local machine. Pinning the SSDP
+// multicast join to one of these would make discovery invisible on the LAN.
+[[nodiscard]] bool is_loopback_host(std::string_view host) noexcept {
+    return host.starts_with("127.") || host == "::1" || host == "localhost";
+}
+
 [[nodiscard]] std::string env_or(std::string_view name, std::string fallback) {
     if (auto const* v = std::getenv(std::string{name}.c_str()); v != nullptr) {
         return std::string{v};
@@ -318,6 +324,13 @@ int main(int argc, char** argv) {
         ssdp_cfg.description_url = server->config().base_url + "/description.xml";
         ssdp_cfg.udn = server->config().device.udn;
         ssdp_cfg.server_token = std::string{sonarium::core::server_signature()};
+        // Pin the multicast join to the advertised interface so multi-homed
+        // hosts answer M-SEARCH from the LAN-visible address. A loopback
+        // fallback stays unpinned — joining 127.0.0.1 would hide SSDP from
+        // the LAN entirely.
+        if (!is_loopback_host(advertised_host)) {
+            ssdp_cfg.interface_address = advertised_host;
+        }
         ssdp_cfg.cache_max_age_seconds = 1800;
         ssdp_cfg.alive_interval = std::chrono::seconds{900};
         ssdp.emplace(std::move(ssdp_cfg), logging.logger);
