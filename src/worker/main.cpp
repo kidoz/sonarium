@@ -79,6 +79,15 @@ void print_report(sonarium::scanner::ScanReport const& r) {
     return (parsed > 0) ? parsed : 60;
 }
 
+[[nodiscard]] std::int64_t parse_debounce_seconds() {
+    auto const* raw = std::getenv("SONARIUM_WORKER_DEBOUNCE_SECONDS");
+    if (raw == nullptr) {
+        return 2;
+    }
+    auto const parsed = std::strtol(raw, nullptr, 10);
+    return (parsed >= 0) ? parsed : 2;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -157,14 +166,29 @@ int main(int argc, char** argv) {
     }
     std::cout << "  watcher=" << watcher->backend_name() << '\n';
 
+    // Debounce window: after a native-backend wakeup, keep draining events
+    // until the tree has been quiet for the full window, so a large library
+    // copy triggers one rescan instead of one per burst. Polling backends
+    // unconditionally report "changed", so debouncing them would spin.
+    auto const debounce = std::chrono::seconds{parse_debounce_seconds()};
+    bool const debounce_enabled = watcher->backend_name() != "polling" && debounce.count() > 0;
+
     while (!g_stop.load(std::memory_order_relaxed)) {
         bool const changed = watcher->wait_for_change(std::chrono::seconds{poll_seconds}, g_stop);
         if (g_stop.load(std::memory_order_relaxed)) {
             break;
         }
-        if (changed) {
-            run_pass();
+        if (!changed) {
+            continue;
         }
+        if (debounce_enabled) {
+            while (!g_stop.load(std::memory_order_relaxed)
+                   && watcher->wait_for_change(debounce, g_stop)) {}
+            if (g_stop.load(std::memory_order_relaxed)) {
+                break;
+            }
+        }
+        run_pass();
     }
     std::cout << "  worker stopped\n";
     return 0;

@@ -3,13 +3,14 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <poll.h>
 #include <string>
 #include <sys/inotify.h>
 #include <unistd.h>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace sonarium::worker {
@@ -35,7 +36,9 @@ constexpr std::uint32_t watch_mask = IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_
 
 class InotifyWatcher final : public FsWatcher {
 public:
-    InotifyWatcher(int fd, std::vector<int> watches)
+    // `watches` maps watch descriptor -> directory path so that IN_CREATE
+    // events can be resolved to full paths (and new subdirectories watched).
+    InotifyWatcher(int fd, std::unordered_map<int, std::filesystem::path> watches)
         : fd_{fd}, watches_{std::move(watches)} {}
 
     InotifyWatcher(InotifyWatcher const&) = delete;
@@ -45,7 +48,7 @@ public:
 
     ~InotifyWatcher() override {
         if (fd_ >= 0) {
-            for (int const wd : watches_) {
+            for (auto const& [wd, path] : watches_) {
                 ::inotify_rm_watch(fd_, wd);
             }
             ::close(fd_);
@@ -85,18 +88,54 @@ public:
 private:
     void drain_events() {
         // Read until the queue is empty so we don't get woken up immediately
-        // on the next poll for events we already accounted for.
-        std::array<char, 8192> buf{};
+        // on the next poll for events we already accounted for. While
+        // draining, watch any directory created (or moved in) after startup —
+        // inotify watches are not recursive, so without this a fresh
+        // `<artist>/<album>/` tree would be invisible until an already-watched
+        // directory changed.
+        alignas(inotify_event) std::array<char, 8192> buf{};
         while (true) {
             auto const n = ::read(fd_, buf.data(), buf.size());
             if (n <= 0) {
                 return;
             }
+            std::size_t offset = 0;
+            while (offset + sizeof(inotify_event) <= static_cast<std::size_t>(n)) {
+                auto const* event = reinterpret_cast<inotify_event const*>(buf.data() + offset);
+                if ((event->mask & IN_ISDIR) != 0
+                    && (event->mask & (IN_CREATE | IN_MOVED_TO)) != 0 && event->len > 0) {
+                    if (auto const it = watches_.find(event->wd); it != watches_.end()) {
+                        // A moved-in directory may already contain subdirs.
+                        watch_tree(it->second / event->name);
+                    }
+                }
+                offset += sizeof(inotify_event) + event->len;
+            }
+        }
+    }
+
+    void watch_tree(std::filesystem::path const& dir) {
+        add_watch(dir);
+        std::error_code ec;
+        for (auto it = std::filesystem::recursive_directory_iterator{
+                 dir, std::filesystem::directory_options::skip_permission_denied, ec};
+             !ec && it != std::filesystem::recursive_directory_iterator{};
+             it.increment(ec)) {
+            if (it->is_directory(ec)) {
+                add_watch(it->path());
+            }
+        }
+    }
+
+    void add_watch(std::filesystem::path const& dir) {
+        int const wd = ::inotify_add_watch(fd_, dir.c_str(), watch_mask);
+        if (wd >= 0) {
+            watches_[wd] = dir;
         }
     }
 
     int fd_;
-    std::vector<int> watches_;
+    std::unordered_map<int, std::filesystem::path> watches_;
 };
 
 } // namespace
@@ -108,12 +147,12 @@ make_native_fs_watcher(std::filesystem::path const& root) {
         return std::unexpected("inotify_init1: " + strerror_safe(errno));
     }
 
-    std::vector<int> watches;
+    std::unordered_map<int, std::filesystem::path> watches;
     std::error_code ec;
     auto add = [&](std::filesystem::path const& dir) {
         int const wd = ::inotify_add_watch(fd, dir.c_str(), watch_mask);
         if (wd >= 0) {
-            watches.push_back(wd);
+            watches[wd] = dir;
         }
     };
     add(root);
