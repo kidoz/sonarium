@@ -1,0 +1,120 @@
+# Sonarium CI.
+#
+# Jobs:
+#   gate      — the canonical `just check` (format-check + clang-tidy + tests)
+#               plus the end-to-end DLNA smoke, on Linux with clang.
+#   macos     — build + tests on macOS (format/lint run only on Linux so tool
+#               version skew between platforms can't produce false failures).
+#   sanitize  — ASan + UBSan across every sonarium suite.
+#   tsan      — TSan across the threaded suites (SSDP, watchers, segmenter).
+#   postgres  — catalog suite against a live Postgres 16 service.
+#
+# First configure fetches the Meson wraps (atria/ctorwire/logspine/asterorm/
+# Catch2) from their pinned git revisions, so jobs need network on setup.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CC: clang
+  CXX: clang++
+
+jobs:
+  gate:
+    name: gate (format + lint + tests, Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build clang clang-tidy clang-format ffmpeg libpq-dev just
+      - name: Gate (format-check + lint)
+        run: just format-check lint
+      - name: Tests (relaxed timeouts for shared runners)
+        run: just test 3
+      - name: Smoke (end-to-end DLNA probes)
+        run: just smoke
+
+  macos:
+    name: build + tests (macOS)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: brew install meson ninja just ffmpeg libpq
+      - name: Tests
+        run: just test 3
+
+  sanitize:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build clang ffmpeg libpq-dev
+      - name: Configure
+        run: meson setup buildSan -Db_sanitize=address,undefined -Dbuildtype=debugoptimized
+      - name: Tests
+        run: |
+          meson test -C buildSan --timeout-multiplier 4 --print-errorlogs \
+            --suite=core --suite=media --suite=catalog --suite=scanner --suite=dlna-core \
+            --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=server \
+            --suite=worker --suite=cli --suite=smoke
+
+  tsan:
+    name: TSan (threaded suites)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build clang ffmpeg libpq-dev
+      - name: Configure
+        run: meson setup buildTsan -Db_sanitize=thread -Dbuildtype=debugoptimized
+      - name: Tests
+        run: |
+          meson test -C buildTsan --timeout-multiplier 4 --print-errorlogs \
+            --suite=composition --suite=worker --suite=hls --suite=core
+
+  postgres:
+    name: catalog suite vs live Postgres
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sonarium
+          POSTGRES_PASSWORD: sonarium
+          POSTGRES_DB: sonarium
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sonarium -d sonarium"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build clang ffmpeg libpq-dev just
+      - name: Catalog suite against the service container
+        run: just test-pg

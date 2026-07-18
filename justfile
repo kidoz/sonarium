@@ -55,12 +55,13 @@ distclean: clean
 # Tests
 # ---------------------------------------------------------------------------
 
-# Run sonarium suites only (skip atria's own integration tests).
-test: build
-    meson test -C {{build_dir}} \
+# Run sonarium suites only (skip atria's own integration tests). Optional
+# timeout multiplier for slow environments — e.g. `just test 3` on CI runners.
+test mult="1": build
+    meson test -C {{build_dir}} --timeout-multiplier {{mult}} \
         --suite=core --suite=media --suite=catalog --suite=scanner --suite=dlna-core \
-        --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=worker \
-        --suite=cli --suite=smoke
+        --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=server \
+        --suite=worker --suite=cli --suite=smoke
 
 # Run a single suite — e.g. `just test-suite composition`.
 test-suite suite: build
