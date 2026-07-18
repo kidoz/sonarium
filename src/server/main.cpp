@@ -1,6 +1,8 @@
+#include <atomic>
 #include <atria/application.hpp>
 #include <atria/middleware.hpp>
 #include <atria/server_config.hpp>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -126,6 +128,17 @@ try_open_postgres_catalog(std::string_view conninfo) {
 
 [[nodiscard]] ::atria::Response not_found() {
     return ::atria::Response{::atria::Status::NotFound};
+}
+
+// SIGINT/SIGTERM → Application::shutdown(), which only stores an atomic flag
+// (async-signal-safe). The accept loop notices within its poll interval, so
+// `listen()` returns instead of the process dying mid-request.
+std::atomic<::atria::Application*> g_shutdown_app{nullptr};
+
+void handle_shutdown_signal(int /*signum*/) {
+    if (auto* app = g_shutdown_app.load()) {
+        app->shutdown();
+    }
 }
 
 [[nodiscard]] ::atria::Response m3u8_ok(std::string body) {
@@ -350,6 +363,9 @@ int main() {
     std::cout << '\n';
 
     ::atria::Application app;
+    g_shutdown_app.store(&app);
+    std::signal(SIGINT, handle_shutdown_signal);
+    std::signal(SIGTERM, handle_shutdown_signal);
     app.use(::atria::middleware::error_handler());
     app.use(::atria::middleware::request_logger());
     register_hls_routes(app,
@@ -363,5 +379,8 @@ int main() {
     cfg.host = bind_host;
     cfg.port = http_port;
     cfg.worker_threads = 2;
-    return app.listen(cfg);
+    auto const rc = app.listen(cfg);
+    g_shutdown_app.store(nullptr);
+    std::cout << "  server stopped\n";
+    return rc;
 }

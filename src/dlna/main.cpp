@@ -1,7 +1,9 @@
+#include <atomic>
 #include <atria/application.hpp>
 #include <atria/middleware.hpp>
 #include <atria/network_interface.hpp>
 #include <atria/server_config.hpp>
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -198,6 +200,17 @@ build_service_config(std::string_view advertised_host,
     return false;
 }
 
+// SIGINT/SIGTERM → Application::shutdown(), which only stores an atomic flag
+// (async-signal-safe). The accept loop notices within its poll interval, so
+// `listen()` returns and the SSDP byebye + logger flush below actually run.
+std::atomic<::atria::Application*> g_shutdown_app{nullptr};
+
+void handle_shutdown_signal(int /*signum*/) {
+    if (auto* app = g_shutdown_app.load()) {
+        app->shutdown();
+    }
+}
+
 void run_offline_preview(sonarium::composition::DlnaServer& server) {
     constexpr auto browse_root = R"(<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
@@ -305,6 +318,9 @@ int main(int argc, char** argv) {
     }
 
     ::atria::Application app;
+    g_shutdown_app.store(&app);
+    std::signal(SIGINT, handle_shutdown_signal);
+    std::signal(SIGTERM, handle_shutdown_signal);
     app.use(::atria::middleware::error_handler());
     app.use(::atria::middleware::request_logger());
     sonarium::composition::register_dlna_routes(
@@ -352,6 +368,7 @@ int main(int argc, char** argv) {
               << "/description.xml\n";
 
     auto const rc = app.listen(cfg);
+    g_shutdown_app.store(nullptr);
     if (ssdp.has_value()) {
         ssdp->stop();
     }
