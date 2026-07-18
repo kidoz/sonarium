@@ -44,10 +44,12 @@ std::string build_device_description(DeviceInfo const& info, DeviceServicePaths 
     std::string out;
     out.reserve(1024);
     out.append(R"(<?xml version="1.0" encoding="utf-8"?>)");
-    out.append(R"(<root xmlns="urn:schemas-upnp-org:device-1-0">)");
+    out.append(
+        R"(<root xmlns="urn:schemas-upnp-org:device-1-0" xmlns:dlna="urn:schemas-dlna-org:device-1-0">)");
     out.append("<specVersion><major>1</major><minor>0</minor></specVersion>");
     out.append("<device>");
     out.append("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>");
+    out.append("<dlna:X_DLNADOC>DMS-1.50</dlna:X_DLNADOC>");
 
     append_optional_element(out, "friendlyName", info.friendly_name);
     append_optional_element(out, "manufacturer", info.manufacturer);
