@@ -23,6 +23,7 @@ Checks: >
   portability-*,
   readability-*,
   -bugprone-easily-swappable-parameters,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   -bugprone-throwing-static-initialization,
   -cert-err58-cpp,
   -cppcoreguidelines-avoid-do-while,
@@ -48,7 +49,12 @@ Checks: >
   -readability-function-cognitive-complexity,
   -readability-named-parameter
 
-WarningsAsErrors: ''
+# Checks that are currently clean across the tree and must stay that way —
+# these fail the lint gate. The remaining categories report as warnings until
+# their existing findings are burned down. EnumCastOutOfRange is excluded
+# above: it fires on Catch2 internals and on the deliberate HTTP-503 cast
+# (atria's Status enum lacks the value).
+WarningsAsErrors: 'clang-analyzer-*,bugprone-use-after-move,bugprone-dangling-handle'
 HeaderFilterRegex: '^(src|tests|examples)/.*\.(h|hpp)$'
 FormatStyle: file
 
