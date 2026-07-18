@@ -8,6 +8,7 @@ core_lib = static_library(
         'hmac_sha256.cpp',
         'media_token.cpp',
         'operator_mode.cpp',
+        'path_containment.cpp',
     ),
     include_directories : sonarium_inc,
     cpp_args : sonarium_common_args,
@@ -51,4 +52,6 @@ sonarium_lint_sources += files(
     'media_token.cpp',
     'operator_mode.hpp',
     'operator_mode.cpp',
+    'path_containment.hpp',
+    'path_containment.cpp',
 )

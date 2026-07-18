@@ -20,6 +20,7 @@
 #include "catalog/repository.hpp"
 #include "core/media_token.hpp"
 #include "core/operator_mode.hpp"
+#include "core/path_containment.hpp"
 #include "core/version.hpp"
 #include "hls/playlist_builder.hpp"
 #include "hls/segmenter.hpp"
@@ -210,7 +211,8 @@ void register_hls_routes(::atria::Application& app,
                          std::shared_ptr<sonarium::core::MediaTokenSigner const> signer,
                          std::shared_ptr<sonarium::hls::Segmenter> segmenter,
                          std::string media_base_url,
-                         std::string self_base_url) {
+                         std::string self_base_url,
+                         std::filesystem::path media_root) {
     // GET /version — basic liveness/identity probe.
     app.get("/version", [self = self_base_url](::atria::Request&) {
         auto const v = sonarium::core::current_version();
@@ -221,38 +223,38 @@ void register_hls_routes(::atria::Application& app,
     });
 
     // GET /hls/tracks/{id}/master.m3u8 — multi-variant master playlist.
-    app.get(
-        "/hls/tracks/{id}/master.m3u8",
-        [catalog, signer, self_base_url, media_base_url](
-            ::atria::Request& req) -> ::atria::Response {
-            auto const id = req.path_param("id").value_or("");
-            if (id.empty()) {
-                return not_found();
-            }
-            // Master playlist tokens are bound to the track id; the variant
-            // URLs below carry their own rendition-bound tokens.
-            if (!token_ok(*signer, req, id)) {
-                return forbidden();
-            }
-            auto const track = catalog->get_track(id);
-            if (!track.has_value()) {
-                return not_found();
-            }
-            auto const renditions = catalog->list_renditions_for_track(id);
-            if (renditions.empty()) {
-                return not_found();
-            }
-            std::vector<sonarium::hls::MediaVariant> variants;
-            variants.reserve(renditions.size());
-            for (auto const& r : renditions) {
-                // signer.sign() returns "" when disabled, so unconditional append is safe.
-                auto media_url = media_base_url + "/media/renditions/" + r.id + signer->sign(r.id);
-                auto variant = sonarium::hls::variant_from_rendition(r, std::move(media_url));
-                variant.index_url_suffix = signer->sign(r.id);
-                variants.push_back(std::move(variant));
-            }
-            return m3u8_ok(sonarium::hls::build_master_playlist(variants, self_base_url));
-        });
+    app.get("/hls/tracks/{id}/master.m3u8",
+            [catalog, signer, self_base_url, media_base_url](
+                ::atria::Request& req) -> ::atria::Response {
+                auto const id = req.path_param("id").value_or("");
+                if (id.empty()) {
+                    return not_found();
+                }
+                // Master playlist tokens are bound to the track id; the variant
+                // URLs below carry their own rendition-bound tokens.
+                if (!token_ok(*signer, req, id)) {
+                    return forbidden();
+                }
+                auto const track = catalog->get_track(id);
+                if (!track.has_value()) {
+                    return not_found();
+                }
+                auto const renditions = catalog->list_renditions_for_track(id);
+                if (renditions.empty()) {
+                    return not_found();
+                }
+                std::vector<sonarium::hls::MediaVariant> variants;
+                variants.reserve(renditions.size());
+                for (auto const& r : renditions) {
+                    // signer.sign() returns "" when disabled, so unconditional append is safe.
+                    auto media_url =
+                        media_base_url + "/media/renditions/" + r.id + signer->sign(r.id);
+                    auto variant = sonarium::hls::variant_from_rendition(r, std::move(media_url));
+                    variant.index_url_suffix = signer->sign(r.id);
+                    variants.push_back(std::move(variant));
+                }
+                return m3u8_ok(sonarium::hls::build_master_playlist(variants, self_base_url));
+            });
 
     // GET /hls/renditions/{id}/index.m3u8 — segmented VOD playlist. First
     // request to a rendition triggers ffmpeg to write seg00000.ts ... beside
@@ -260,52 +262,60 @@ void register_hls_routes(::atria::Application& app,
     // playlist. When `rendition.storage_path` is empty / missing (e.g. the
     // demo catalog without seeded files) we fall back to the single-segment
     // playlist that points at the existing /media/renditions/{id} route.
-    app.get(
-        "/hls/renditions/{id}/index.m3u8",
-        [catalog, signer, segmenter, media_base_url](::atria::Request& req) -> ::atria::Response {
-            auto const id = req.path_param("id").value_or("");
-            if (id.empty()) {
-                return not_found();
-            }
-            // Gate before any catalog lookup or ffmpeg spawn — an untokened
-            // request must not be able to trigger segmentation work.
-            if (!token_ok(*signer, req, id)) {
-                return forbidden();
-            }
-            auto rendition = catalog->get_rendition(id);
-            if (!rendition.has_value()) {
-                return not_found();
-            }
+    app.get("/hls/renditions/{id}/index.m3u8",
+            [catalog, signer, segmenter, media_base_url, media_root](
+                ::atria::Request& req) -> ::atria::Response {
+                auto const id = req.path_param("id").value_or("");
+                if (id.empty()) {
+                    return not_found();
+                }
+                // Gate before any catalog lookup or ffmpeg spawn — an untokened
+                // request must not be able to trigger segmentation work.
+                if (!token_ok(*signer, req, id)) {
+                    return forbidden();
+                }
+                auto rendition = catalog->get_rendition(id);
+                if (!rendition.has_value()) {
+                    return not_found();
+                }
 
-            // No on-disk source → fall back to single-segment playlist.
-            std::error_code ec;
-            if (rendition->storage_path.empty()
-                || !std::filesystem::exists(rendition->storage_path, ec)) {
-                auto media_url = media_base_url + "/media/renditions/" + rendition->id
-                                 + signer->sign(rendition->id);
-                auto const variant =
-                    sonarium::hls::variant_from_rendition(*rendition, std::move(media_url));
-                return m3u8_ok(sonarium::hls::build_media_playlist(variant));
-            }
+                // The segmenter reads the storage path from disk — it must resolve
+                // inside the media root, same policy as the direct media route.
+                if (!rendition->storage_path.empty()
+                    && !sonarium::core::path_within_root(
+                        std::filesystem::path{rendition->storage_path}, media_root)) {
+                    return not_found();
+                }
 
-            // Use the rendition's natural bitrate so an ABR set with
-            // different rendition.bitrate_bps values produces actually
-            // distinct segment ladders. Zero falls back to the cfg default.
-            auto const per_rendition_kbps =
-                (rendition->bitrate_bps > 0) ? (rendition->bitrate_bps / 1000U) : 0U;
-            auto playlist_path = segmenter->ensure_segments(
-                std::string{id}, rendition->storage_path, per_rendition_kbps);
-            if (!playlist_path.has_value()) {
-                ::atria::Response r{::atria::Status::InternalServerError};
-                r.set_body("segmenter: " + playlist_path.error() + "\n");
-                return r;
-            }
-            auto body = read_file(*playlist_path);
-            if (!body.has_value()) {
-                return not_found();
-            }
-            return m3u8_ok(with_signed_segment_urls(*body, signer->sign(rendition->id)));
-        });
+                // No on-disk source → fall back to single-segment playlist.
+                std::error_code ec;
+                if (rendition->storage_path.empty()
+                    || !std::filesystem::exists(rendition->storage_path, ec)) {
+                    auto media_url = media_base_url + "/media/renditions/" + rendition->id
+                                     + signer->sign(rendition->id);
+                    auto const variant =
+                        sonarium::hls::variant_from_rendition(*rendition, std::move(media_url));
+                    return m3u8_ok(sonarium::hls::build_media_playlist(variant));
+                }
+
+                // Use the rendition's natural bitrate so an ABR set with
+                // different rendition.bitrate_bps values produces actually
+                // distinct segment ladders. Zero falls back to the cfg default.
+                auto const per_rendition_kbps =
+                    (rendition->bitrate_bps > 0) ? (rendition->bitrate_bps / 1000U) : 0U;
+                auto playlist_path = segmenter->ensure_segments(
+                    std::string{id}, rendition->storage_path, per_rendition_kbps);
+                if (!playlist_path.has_value()) {
+                    ::atria::Response r{::atria::Status::InternalServerError};
+                    r.set_body("segmenter: " + playlist_path.error() + "\n");
+                    return r;
+                }
+                auto body = read_file(*playlist_path);
+                if (!body.has_value()) {
+                    return not_found();
+                }
+                return m3u8_ok(with_signed_segment_urls(*body, signer->sign(rendition->id)));
+            });
 
     // GET / HEAD /hls/renditions/{id}/{seg} — serve a cached .ts segment.
     // Filename is validated against `seg\d{5}\.ts`; nothing else is allowed.
@@ -349,6 +359,7 @@ int main() {
                std::string{"http://"} + (bind_host == "0.0.0.0" ? "127.0.0.1" : bind_host) + ":"
                    + std::to_string(http_port));
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const media_root = env_or("SONARIUM_MEDIA_ROOT", "");
     auto const segment_cache_root =
         env_or("SONARIUM_HLS_CACHE_DIR",
                (std::filesystem::temp_directory_path() / "sonarium-hls").string());
@@ -380,6 +391,7 @@ int main() {
         .bind_host = bind_host,
         .media_token_secret = token_secret,
         .pg_conninfo = pg_conninfo,
+        .media_root = media_root,
         .allow_public_bind = allow_public_bind,
     });
     auto const fatal = mode == sonarium::core::OperatorMode::production && !violations.empty();
@@ -418,6 +430,8 @@ int main() {
               << "  self_base=" << self_base << '\n'
               << "  media_base=" << media_base << '\n'
               << "  catalog=" << catalog_kind << '\n'
+              << "  media_root=" << (media_root.empty() ? "<unset — containment off>" : media_root)
+              << '\n'
               << "  hls_cache=" << segment_cache_root << " (segments=" << segment_seconds << "s)\n"
               << "  media_tokens=" << (signer->enabled() ? "enabled" : "disabled");
     if (signer->enabled()) {
@@ -436,7 +450,8 @@ int main() {
                         std::const_pointer_cast<sonarium::core::MediaTokenSigner const>(signer),
                         segmenter,
                         media_base,
-                        self_base);
+                        self_base,
+                        std::filesystem::path{media_root});
 
     ::atria::ServerConfig cfg;
     cfg.host = bind_host;

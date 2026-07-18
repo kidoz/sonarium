@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <memory>
 #include <string>
 
@@ -22,6 +23,11 @@ struct ServiceConfig {
     // Construct with an empty secret to disable signing without forking the
     // route logic.
     std::shared_ptr<sonarium::core::MediaTokenSigner> media_token_signer;
+
+    // Library root that catalog storage paths must resolve into before they
+    // are served (SONARIUM_MEDIA_ROOT). Empty disables containment — dev-mode
+    // only; production startup invariants require it.
+    std::filesystem::path media_root;
 };
 
 } // namespace sonarium::composition

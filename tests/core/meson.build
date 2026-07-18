@@ -7,6 +7,7 @@ core_tests = executable(
         'hmac_sha256_tests.cpp',
         'media_token_tests.cpp',
         'operator_mode_tests.cpp',
+        'path_containment_tests.cpp',
     ),
     dependencies : [
         sonarium_module_deps['core'],
@@ -30,4 +31,5 @@ sonarium_lint_sources += files(
     'hmac_sha256_tests.cpp',
     'media_token_tests.cpp',
     'operator_mode_tests.cpp',
+    'path_containment_tests.cpp',
 )

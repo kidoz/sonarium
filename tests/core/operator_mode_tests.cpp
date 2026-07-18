@@ -32,6 +32,7 @@ TEST_CASE("safe production config produces no violations", "[core][operator_mode
         .bind_host = "192.168.1.10",
         .media_token_secret = "rotating-32-byte-secret",
         .pg_conninfo = "host=db user=sonarium dbname=sonarium",
+        .media_root = "/srv/music",
         .allow_public_bind = false,
     };
     REQUIRE(check_startup_invariants(inv).empty());
@@ -42,6 +43,7 @@ TEST_CASE("wildcard bind_host triggers a violation by default", "[core][operator
         .bind_host = "0.0.0.0",
         .media_token_secret = "ok",
         .pg_conninfo = "ok",
+        .media_root = "/srv/music",
         .allow_public_bind = false,
     };
     auto const v = check_startup_invariants(inv);
@@ -60,6 +62,7 @@ TEST_CASE("allow_public_bind suppresses the bind violation", "[core][operator_mo
         .bind_host = "0.0.0.0",
         .media_token_secret = "ok",
         .pg_conninfo = "ok",
+        .media_root = "/srv/music",
         .allow_public_bind = true,
     };
     REQUIRE(check_startup_invariants(inv).empty());
@@ -70,6 +73,7 @@ TEST_CASE("empty media token secret triggers a violation", "[core][operator_mode
         .bind_host = "192.168.1.10",
         .media_token_secret = "",
         .pg_conninfo = "ok",
+        .media_root = "/srv/music",
         .allow_public_bind = false,
     };
     auto const v = check_startup_invariants(inv);
@@ -82,6 +86,7 @@ TEST_CASE("empty pg_conninfo triggers a violation", "[core][operator_mode]") {
         .bind_host = "192.168.1.10",
         .media_token_secret = "ok",
         .pg_conninfo = "",
+        .media_root = "/srv/music",
         .allow_public_bind = false,
     };
     auto const v = check_startup_invariants(inv);
@@ -96,5 +101,5 @@ TEST_CASE("multiple violations are reported together", "[core][operator_mode]") 
         .pg_conninfo = "",
         .allow_public_bind = false,
     };
-    REQUIRE(check_startup_invariants(inv).size() == 3);
+    REQUIRE(check_startup_invariants(inv).size() == 4);
 }

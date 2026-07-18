@@ -10,6 +10,7 @@
 #include <system_error>
 #include <utility>
 
+#include "core/path_containment.hpp"
 #include "media/mime_type.hpp"
 
 namespace sonarium::composition {
@@ -47,16 +48,21 @@ namespace {
         sonarium::media::default_mime_for(sonarium::media::RenditionMime{r.codec, r.container})};
 }
 
-[[nodiscard]] bool storage_path_is_servable(std::string const& path) noexcept {
+// A catalog storage path is servable when it is a regular file that resolves
+// inside the configured media root. The containment check is the security
+// boundary against poisoned catalog rows and symlinks pointing outside the
+// library tree; an empty root (dev mode) skips it.
+[[nodiscard]] bool storage_path_is_servable(std::string const& path,
+                                            std::filesystem::path const& media_root) {
     if (path.empty()) {
         return false;
     }
     std::error_code ec;
     auto const status = std::filesystem::status(std::filesystem::path{path}, ec);
-    if (ec) {
+    if (ec || !std::filesystem::is_regular_file(status)) {
         return false;
     }
-    return std::filesystem::is_regular_file(status);
+    return sonarium::core::path_within_root(std::filesystem::path{path}, media_root);
 }
 
 } // namespace
@@ -141,7 +147,7 @@ void register_dlna_routes(::atria::Application& app,
         if (!rendition.has_value()) {
             return not_found();
         }
-        if (!storage_path_is_servable(rendition->storage_path)) {
+        if (!storage_path_is_servable(rendition->storage_path, server->config().media_root)) {
             return not_found();
         }
         ::atria::FileResponseOptions opts;
@@ -161,7 +167,7 @@ void register_dlna_routes(::atria::Application& app,
     //
     // Resolves the album's cover_art_asset_id through the repository asset
     // lookup, then serves the asset file with its registered MIME.
-    auto album_art_handler = [catalog](::atria::Request& req) -> ::atria::Response {
+    auto album_art_handler = [catalog, server](::atria::Request& req) -> ::atria::Response {
         auto const id = req.path_param("id").value_or("");
         if (id.empty()) {
             return not_found();
@@ -172,7 +178,8 @@ void register_dlna_routes(::atria::Application& app,
             return not_found();
         }
         auto asset = catalog->get_asset(*album->cover_art_asset_id);
-        if (!asset.has_value() || !storage_path_is_servable(asset->storage_path)) {
+        if (!asset.has_value()
+            || !storage_path_is_servable(asset->storage_path, server->config().media_root)) {
             return not_found();
         }
         ::atria::FileResponseOptions opts;

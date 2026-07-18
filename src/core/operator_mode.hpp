@@ -23,6 +23,9 @@ struct StartupInvariants {
     std::string_view bind_host;
     std::string_view media_token_secret;
     std::string_view pg_conninfo;
+    // SONARIUM_MEDIA_ROOT — library root that served file paths must resolve
+    // into. Empty disables containment, which is a violation in production.
+    std::string_view media_root;
     // SONARIUM_ALLOW_PUBLIC_BIND=1 lets an operator opt in to 0.0.0.0 in
     // production after acknowledging the LAN-only policy. Off by default.
     bool allow_public_bind = false;

@@ -134,7 +134,8 @@ std::shared_ptr<sonarium::catalog::Repository> sample_catalog() {
 build_service_config(std::string_view advertised_host,
                      std::uint16_t port,
                      sonarium::dlna::DlnaConfig const& app_cfg,
-                     std::shared_ptr<sonarium::core::MediaTokenSigner> signer) {
+                     std::shared_ptr<sonarium::core::MediaTokenSigner> signer,
+                     std::filesystem::path media_root) {
     sonarium::composition::ServiceConfig cfg;
     cfg.device.friendly_name = app_cfg.friendly_name;
     cfg.device.manufacturer = "Kidoz";
@@ -144,6 +145,7 @@ build_service_config(std::string_view advertised_host,
     cfg.base_url = "http://" + std::string{advertised_host} + ":" + std::to_string(port);
     cfg.protocol_info_catalog = sonarium::dlna::default_protocol_info_catalog();
     cfg.media_token_signer = std::move(signer);
+    cfg.media_root = std::move(media_root);
     return cfg;
 }
 
@@ -253,12 +255,14 @@ int main(int argc, char** argv) {
     auto signer = std::make_shared<sonarium::core::MediaTokenSigner>(token_secret);
 
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const media_root = env_or("SONARIUM_MEDIA_ROOT", "");
     auto const mode = sonarium::core::current_operator_mode();
     auto const allow_public_bind = env_or("SONARIUM_ALLOW_PUBLIC_BIND", "0") != "0";
     auto const violations = sonarium::core::check_startup_invariants({
         .bind_host = bind_host,
         .media_token_secret = token_secret,
         .pg_conninfo = pg_conninfo,
+        .media_root = media_root,
         .allow_public_bind = allow_public_bind,
     });
     auto const fatal = mode == sonarium::core::OperatorMode::production && !violations.empty();
@@ -298,7 +302,8 @@ int main(int argc, char** argv) {
         catalog,
         profiles,
         logging.logger,
-        build_service_config(advertised_host, http_port, app_cfg, signer));
+        build_service_config(
+            advertised_host, http_port, app_cfg, signer, std::filesystem::path{media_root}));
 
     std::cout << sonarium::core::product_name() << " DLNA " << v.major << '.' << v.minor << '.'
               << v.patch << '\n'
@@ -307,6 +312,8 @@ int main(int argc, char** argv) {
               << "  advertised_host=" << advertised_host << '\n'
               << "  http_port=" << http_port << '\n'
               << "  media_tokens=" << (signer->enabled() ? "enabled" : "disabled") << '\n'
+              << "  media_root=" << (media_root.empty() ? "<unset — containment off>" : media_root)
+              << '\n'
               << "  catalog=" << catalog_kind << '\n'
               << "  composition graph resolved via ctorwire (LogSpine console logger)\n";
 

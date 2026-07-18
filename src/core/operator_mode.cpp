@@ -70,6 +70,12 @@ std::vector<std::string> check_startup_invariants(StartupInvariants const& inv) 
             "demo catalog");
     }
 
+    if (inv.media_root.empty()) {
+        violations.emplace_back(
+            "media_root: SONARIUM_MEDIA_ROOT is empty — served file paths are not contained to a "
+            "library root, so a poisoned catalog row could expose arbitrary files");
+    }
+
     return violations;
 }
 
