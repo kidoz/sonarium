@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -31,6 +32,35 @@ struct SsdpConfig {
     std::uint32_t cache_max_age_seconds = 1800;
     // Half of cache_max_age is the conventional alive cadence.
     std::chrono::milliseconds alive_interval{std::chrono::seconds{900}};
+    // Token-bucket cap on M-SEARCH responses. A spoofed-source flood would
+    // otherwise turn the responder into a (small) reflection amplifier.
+    // 0 disables the limit.
+    double msearch_responses_per_second = 10.0;
+    double msearch_response_burst = 25.0;
+};
+
+// True when an M-SEARCH source address is a plausible LAN peer: RFC 1918
+// private ranges, loopback, or link-local IPv4. The SSDP responder answers
+// the *claimed* datagram source, so replying to a public address would
+// reflect traffic at a spoofed victim.
+[[nodiscard]] bool is_lan_msearch_source(std::string_view address) noexcept;
+
+// Token bucket limiting M-SEARCH response packets. Pure logic — the caller
+// supplies timestamps, so tests don't sleep. Not thread-safe; the SSDP
+// receive thread is the only user.
+class SsdpResponseBudget {
+public:
+    SsdpResponseBudget(double rate_per_second, double burst) noexcept
+        : rate_{rate_per_second}, burst_{burst}, tokens_{burst} {}
+
+    // Whether `count` response packets may be sent at `now`; deducts on success.
+    [[nodiscard]] bool allow(std::size_t count, std::chrono::steady_clock::time_point now) noexcept;
+
+private:
+    double rate_;
+    double burst_;
+    double tokens_;
+    std::optional<std::chrono::steady_clock::time_point> last_;
 };
 
 // One outbound SSDP packet ready for the wire.
@@ -90,6 +120,8 @@ private:
     std::thread receive_thread_;
     std::mutex send_mutex_;
     std::atomic<bool> running_{false};
+    // Touched only by the receive thread.
+    std::optional<SsdpResponseBudget> response_budget_;
 };
 
 } // namespace sonarium::composition

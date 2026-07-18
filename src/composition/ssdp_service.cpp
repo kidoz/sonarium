@@ -1,8 +1,10 @@
 #include "composition/ssdp_service.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <logspine/field.hpp>
 #include <span>
 #include <string>
@@ -33,6 +35,71 @@ make_advert_fields(SsdpConfig const& config, std::string nt_or_st, std::string u
 }
 
 } // namespace
+
+bool is_lan_msearch_source(std::string_view address) noexcept {
+    std::array<std::uint32_t, 4> octet{};
+    std::size_t idx = 0;
+    std::uint32_t current = 0;
+    bool digit_seen = false;
+    for (char const c : address) {
+        if (c >= '0' && c <= '9') {
+            current = (current * 10) + static_cast<std::uint32_t>(c - '0');
+            if (current > 255) {
+                return false;
+            }
+            digit_seen = true;
+            continue;
+        }
+        if (c == '.') {
+            if (!digit_seen || idx >= 3) {
+                return false;
+            }
+            octet[idx++] = current;
+            current = 0;
+            digit_seen = false;
+            continue;
+        }
+        return false;
+    }
+    if (!digit_seen || idx != 3) {
+        return false;
+    }
+    octet[3] = current;
+
+    if (octet[0] == 10 || octet[0] == 127) {
+        return true; // 10/8 private, 127/8 loopback
+    }
+    if (octet[0] == 172 && octet[1] >= 16 && octet[1] <= 31) {
+        return true; // 172.16/12 private
+    }
+    if (octet[0] == 192 && octet[1] == 168) {
+        return true; // 192.168/16 private
+    }
+    if (octet[0] == 169 && octet[1] == 254) {
+        return true; // 169.254/16 link-local
+    }
+    return false;
+}
+
+bool SsdpResponseBudget::allow(std::size_t count,
+                               std::chrono::steady_clock::time_point now) noexcept {
+    if (rate_ <= 0.0) {
+        return true;
+    }
+    if (last_.has_value()) {
+        auto const elapsed = std::chrono::duration<double>(now - *last_).count();
+        if (elapsed > 0.0) {
+            tokens_ = std::min(burst_, tokens_ + (elapsed * rate_));
+        }
+    }
+    last_ = now;
+    auto const need = static_cast<double>(count);
+    if (tokens_ < need) {
+        return false;
+    }
+    tokens_ -= need;
+    return true;
+}
 
 std::vector<OutboundMessage> responses_for_msearch(SsdpConfig const& config,
                                                    sonarium::upnp::ssdp::MSearch const& msearch,
@@ -123,6 +190,7 @@ std::expected<void, std::string> SsdpService::start() {
     }
 
     socket_.emplace(std::move(*socket));
+    response_budget_.emplace(config_.msearch_responses_per_second, config_.msearch_response_burst);
     running_.store(true, std::memory_order_release);
 
     receive_thread_ = std::thread{[this] { receive_loop(); }};
@@ -195,10 +263,27 @@ void SsdpService::receive_loop() {
             continue;
         }
 
+        // We answer the datagram's claimed source; a spoofed public address
+        // would make us reflect packets at a victim outside the LAN.
+        if (!is_lan_msearch_source(received->remote.address)) {
+            logger_->debug("ssdp.msearch.ignored_source",
+                           {::logspine::kv("component", std::string{"SsdpService"}),
+                            ::logspine::kv("remote_ip", received->remote.address)});
+            continue;
+        }
+
         auto responses = responses_for_msearch(
             config_, *parsed, received->remote.address, received->remote.port);
         if (responses.empty()) {
             // ST didn't match anything we advertise.
+            continue;
+        }
+
+        if (response_budget_.has_value()
+            && !response_budget_->allow(responses.size(), std::chrono::steady_clock::now())) {
+            logger_->debug("ssdp.msearch.throttled",
+                           {::logspine::kv("component", std::string{"SsdpService"}),
+                            ::logspine::kv("remote_ip", received->remote.address)});
             continue;
         }
 

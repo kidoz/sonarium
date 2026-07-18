@@ -160,3 +160,46 @@ TEST_CASE("LOCATION never resolves to 0.0.0.0 from helpers", "[composition][ssdp
         REQUIRE(m.payload.find("LOCATION: http://0.0.0.0") == std::string::npos);
     }
 }
+
+TEST_CASE("is_lan_msearch_source admits private / loopback / link-local IPv4",
+          "[composition][ssdp]") {
+    using sonarium::composition::is_lan_msearch_source;
+    REQUIRE(is_lan_msearch_source("192.168.1.20"));
+    REQUIRE(is_lan_msearch_source("10.0.0.7"));
+    REQUIRE(is_lan_msearch_source("172.16.4.1"));
+    REQUIRE(is_lan_msearch_source("172.31.255.254"));
+    REQUIRE(is_lan_msearch_source("169.254.10.10"));
+    REQUIRE(is_lan_msearch_source("127.0.0.1"));
+}
+
+TEST_CASE("is_lan_msearch_source rejects public and malformed sources", "[composition][ssdp]") {
+    using sonarium::composition::is_lan_msearch_source;
+    REQUIRE_FALSE(is_lan_msearch_source("8.8.8.8"));
+    REQUIRE_FALSE(is_lan_msearch_source("172.32.0.1"));  // just past 172.16/12
+    REQUIRE_FALSE(is_lan_msearch_source("192.169.0.1")); // just past 192.168/16
+    REQUIRE_FALSE(is_lan_msearch_source("256.168.0.1"));
+    REQUIRE_FALSE(is_lan_msearch_source("192.168.1"));
+    REQUIRE_FALSE(is_lan_msearch_source("192.168.1.1.1"));
+    REQUIRE_FALSE(is_lan_msearch_source(""));
+    REQUIRE_FALSE(is_lan_msearch_source("evil"));
+    REQUIRE_FALSE(is_lan_msearch_source("::1")); // socket is IPv4-only
+}
+
+TEST_CASE("SsdpResponseBudget throttles bursts and refills over time", "[composition][ssdp]") {
+    using sonarium::composition::SsdpResponseBudget;
+    using Clock = std::chrono::steady_clock;
+    auto const t0 = Clock::time_point{std::chrono::seconds{100}};
+
+    SsdpResponseBudget budget{/*rate_per_second=*/10.0, /*burst=*/25.0};
+    REQUIRE(budget.allow(25, t0));                                 // burst drains the bucket
+    REQUIRE_FALSE(budget.allow(5, t0));                            // immediately empty
+    REQUIRE(budget.allow(5, t0 + std::chrono::seconds{1}));        // 10 refilled
+    REQUIRE_FALSE(budget.allow(20, t0 + std::chrono::seconds{1})); // only 5 left
+}
+
+TEST_CASE("SsdpResponseBudget with zero rate never throttles", "[composition][ssdp]") {
+    using sonarium::composition::SsdpResponseBudget;
+    using Clock = std::chrono::steady_clock;
+    SsdpResponseBudget budget{0.0, 0.0};
+    REQUIRE(budget.allow(1'000'000, Clock::time_point{}));
+}
