@@ -1,5 +1,6 @@
 #include "composition/soap_router.hpp"
 
+#include <exception>
 #include <logspine/field.hpp>
 #include <utility>
 
@@ -53,7 +54,17 @@ std::string SoapRouter::dispatch_body(std::string_view body, std::string_view us
                             static_cast<std::int64_t>(static_cast<unsigned>(parsed.error())))});
         return sonarium::upnp::build_soap_fault(sonarium::upnp::UpnpErrorCode::invalid_args);
     }
-    return dispatch(*parsed, user_agent);
+    // Backend failures (e.g. catalog::RepositoryError on a dropped Postgres
+    // connection) must become a SOAP fault, not an empty listing or a raw 500.
+    try {
+        return dispatch(*parsed, user_agent);
+    } catch (std::exception const& e) {
+        logger_->error("soap.dispatch_failed",
+                       {::logspine::kv("component", std::string{component_name}),
+                        ::logspine::kv("soap_action", parsed->action),
+                        ::logspine::kv("error", std::string{e.what()})});
+        return sonarium::upnp::build_soap_fault(sonarium::upnp::UpnpErrorCode::action_failed);
+    }
 }
 
 } // namespace sonarium::composition

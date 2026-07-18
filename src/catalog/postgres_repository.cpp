@@ -88,41 +88,79 @@ get_optional_text(::asterorm::pg::result const& rows, int r, int c) {
     return rows.get_string(r, c);
 }
 
-[[nodiscard]] std::uint32_t count_query(::asterorm::pg::connection& conn, std::string const& sql) {
-    auto res = conn.execute(sql);
-    if (!res.has_value() || res->rows() == 0) {
-        return 0;
-    }
-    auto cell = res->get_string(0, 0);
-    if (!cell.has_value()) {
-        return 0;
-    }
-    return parse_u<std::uint32_t>(*cell);
-}
-
-[[nodiscard]] std::uint32_t
-count_query_params(::asterorm::pg::connection& conn,
-                   std::string const& sql,
-                   std::vector<std::optional<std::string>> const& params) {
-    auto res = conn.execute_params(sql, params);
-    if (!res.has_value() || res->rows() == 0) {
-        return 0;
-    }
-    auto cell = res->get_string(0, 0);
-    if (!cell.has_value()) {
-        return 0;
-    }
-    return parse_u<std::uint32_t>(*cell);
-}
-
 [[nodiscard]] std::uint32_t requested_or_default(std::uint32_t requested) noexcept {
     return (requested == 0) ? static_cast<std::uint32_t>(default_page_count) : requested;
 }
 
+[[nodiscard]] std::uint32_t first_cell_as_u32(::asterorm::pg::result const& res) {
+    if (res.rows() == 0) {
+        return 0;
+    }
+    auto const cell = res.get_string(0, 0);
+    if (!cell.has_value()) {
+        return 0;
+    }
+    return parse_u<std::uint32_t>(*cell);
+}
+
 } // namespace
 
-PostgresRepository::PostgresRepository(std::shared_ptr<::asterorm::pg::connection> conn) noexcept
-    : conn_{std::move(conn)} {}
+PostgresRepository::PostgresRepository(std::shared_ptr<::asterorm::pg::connection> conn,
+                                       std::string conninfo) noexcept
+    : conn_{std::move(conn)}, conninfo_{std::move(conninfo)} {}
+
+bool PostgresRepository::try_reconnect() const {
+    if (conninfo_.empty()) {
+        return false; // constructed from a bare connection — nothing to redial
+    }
+    ::asterorm::pg::driver const driver;
+    auto fresh = driver.connect(conninfo_);
+    if (!fresh.has_value()) {
+        return false;
+    }
+    conn_ = std::make_shared<::asterorm::pg::connection>(std::move(*fresh));
+    return true;
+}
+
+::asterorm::pg::result PostgresRepository::exec(std::string_view sql) const {
+    if (!conn_->is_open() && !try_reconnect()) {
+        throw RepositoryError{"postgres: connection lost and reconnect failed"};
+    }
+    auto res = conn_->execute(sql);
+    if (!res.has_value() && !conn_->is_open() && try_reconnect()) {
+        res = conn_->execute(sql);
+    }
+    if (!res.has_value()) {
+        throw RepositoryError{"postgres: " + res.error().message};
+    }
+    return std::move(*res);
+}
+
+::asterorm::pg::result
+PostgresRepository::exec_params(std::string_view sql,
+                                std::vector<std::optional<std::string>> const& params) const {
+    if (!conn_->is_open() && !try_reconnect()) {
+        throw RepositoryError{"postgres: connection lost and reconnect failed"};
+    }
+    auto res = conn_->execute_params(sql, params);
+    if (!res.has_value() && !conn_->is_open() && try_reconnect()) {
+        res = conn_->execute_params(sql, params);
+    }
+    if (!res.has_value()) {
+        throw RepositoryError{"postgres: " + res.error().message};
+    }
+    return std::move(*res);
+}
+
+std::uint32_t PostgresRepository::count(std::string_view sql) const {
+    return first_cell_as_u32(exec(sql));
+}
+
+std::uint32_t
+PostgresRepository::count_params(std::string_view sql,
+                                 std::vector<std::optional<std::string>> const& params) const {
+    return first_cell_as_u32(exec_params(sql, params));
+}
 
 std::expected<void, std::string> PostgresRepository::ensure_schema() {
     std::scoped_lock const lock{mutex_};
@@ -143,21 +181,13 @@ PostgresRepository::open(std::string const& conninfo) {
         return std::unexpected(std::string{"connect failed: "} + conn.error().message);
     }
     auto shared = std::make_shared<::asterorm::pg::connection>(std::move(*conn));
-    return std::make_shared<PostgresRepository>(std::move(shared));
+    return std::make_shared<PostgresRepository>(std::move(shared), conninfo);
 }
 
 std::uint32_t PostgresRepository::system_update_id() const {
     std::scoped_lock const lock{mutex_};
-    auto res =
-        conn_->execute("SELECT update_counter FROM system_state WHERE key = 'content_directory'");
-    if (!res.has_value() || res->rows() == 0) {
-        return 0;
-    }
-    auto const cell = res->get_string(0, 0);
-    if (!cell.has_value()) {
-        return 0;
-    }
-    return parse_u<std::uint32_t>(*cell);
+    return first_cell_as_u32(
+        exec("SELECT update_counter FROM system_state WHERE key = 'content_directory'"));
 }
 
 // ---------------------------------------------------------------------------
@@ -168,23 +198,18 @@ Page<Artist> PostgresRepository::list_artists(PageRequest req) const {
     std::scoped_lock const lock{mutex_};
 
     Page<Artist> out;
-    out.total_matches = count_query(*conn_, "SELECT COUNT(*) FROM artist");
+    out.total_matches = count("SELECT COUNT(*) FROM artist");
 
-    auto rows = conn_->execute_params(
-        "SELECT id, name, sort_name FROM artist ORDER BY id LIMIT $1 OFFSET $2",
-        to_params(
-            {as_param(requested_or_default(req.requested_count)), as_param(req.starting_index)}));
-    if (!rows.has_value()) {
-        return out;
-    }
-
-    auto const row_count = rows->rows();
+    auto rows = exec_params("SELECT id, name, sort_name FROM artist ORDER BY id LIMIT $1 OFFSET $2",
+                            to_params({as_param(requested_or_default(req.requested_count)),
+                                       as_param(req.starting_index)}));
+    auto const row_count = rows.rows();
     out.rows.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
         Artist a;
-        a.id = get_text(*rows, r, 0);
-        a.name = get_text(*rows, r, 1);
-        a.sort_name = get_text(*rows, r, 2);
+        a.id = get_text(rows, r, 0);
+        a.name = get_text(rows, r, 1);
+        a.sort_name = get_text(rows, r, 2);
         out.rows.push_back(std::move(a));
     }
     return out;
@@ -192,15 +217,15 @@ Page<Artist> PostgresRepository::list_artists(PageRequest req) const {
 
 std::optional<Artist> PostgresRepository::get_artist(std::string_view id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows = conn_->execute_params("SELECT id, name, sort_name FROM artist WHERE id = $1",
-                                      to_params({as_param(id)}));
-    if (!rows.has_value() || rows->rows() == 0) {
+    auto rows = exec_params("SELECT id, name, sort_name FROM artist WHERE id = $1",
+                            to_params({as_param(id)}));
+    if (rows.rows() == 0) {
         return std::nullopt;
     }
     Artist a;
-    a.id = get_text(*rows, 0, 0);
-    a.name = get_text(*rows, 0, 1);
-    a.sort_name = get_text(*rows, 0, 2);
+    a.id = get_text(rows, 0, 0);
+    a.name = get_text(rows, 0, 1);
+    a.sort_name = get_text(rows, 0, 2);
     return a;
 }
 
@@ -231,37 +256,31 @@ Page<Album> PostgresRepository::list_albums_for_artist(std::string_view artist_i
     std::scoped_lock const lock{mutex_};
 
     Page<Album> out;
-    out.total_matches = count_query_params(*conn_,
-                                           "SELECT COUNT(*) FROM album WHERE artist_id = $1",
-                                           to_params({as_param(artist_id)}));
+    out.total_matches = count_params("SELECT COUNT(*) FROM album WHERE artist_id = $1",
+                                     to_params({as_param(artist_id)}));
 
-    auto rows = conn_->execute_params(
-        std::string{"SELECT "} + std::string{album_columns}
-            + " FROM album WHERE artist_id = $1 ORDER BY id LIMIT $2 OFFSET $3",
-        to_params({as_param(artist_id),
-                   as_param(requested_or_default(req.requested_count)),
-                   as_param(req.starting_index)}));
-    if (!rows.has_value()) {
-        return out;
-    }
-
-    auto const row_count = rows->rows();
+    auto rows = exec_params(std::string{"SELECT "} + std::string{album_columns}
+                                + " FROM album WHERE artist_id = $1 ORDER BY id LIMIT $2 OFFSET $3",
+                            to_params({as_param(artist_id),
+                                       as_param(requested_or_default(req.requested_count)),
+                                       as_param(req.starting_index)}));
+    auto const row_count = rows.rows();
     out.rows.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
-        out.rows.push_back(row_to_album(*rows, r));
+        out.rows.push_back(row_to_album(rows, r));
     }
     return out;
 }
 
 std::optional<Album> PostgresRepository::get_album(std::string_view id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows = conn_->execute_params(std::string{"SELECT "} + std::string{album_columns}
-                                          + " FROM album WHERE id = $1",
-                                      to_params({as_param(id)}));
-    if (!rows.has_value() || rows->rows() == 0) {
+    auto rows = exec_params(std::string{"SELECT "} + std::string{album_columns}
+                                + " FROM album WHERE id = $1",
+                            to_params({as_param(id)}));
+    if (rows.rows() == 0) {
         return std::nullopt;
     }
-    return row_to_album(*rows, 0);
+    return row_to_album(rows, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -293,23 +312,18 @@ Page<Track> PostgresRepository::list_tracks_for_album(std::string_view album_id,
     std::scoped_lock const lock{mutex_};
 
     Page<Track> out;
-    out.total_matches = count_query_params(
-        *conn_, "SELECT COUNT(*) FROM track WHERE album_id = $1", to_params({as_param(album_id)}));
+    out.total_matches = count_params("SELECT COUNT(*) FROM track WHERE album_id = $1",
+                                     to_params({as_param(album_id)}));
 
-    auto rows = conn_->execute_params(
-        std::string{"SELECT "} + std::string{track_columns}
-            + " FROM track WHERE album_id = $1 ORDER BY id LIMIT $2 OFFSET $3",
-        to_params({as_param(album_id),
-                   as_param(requested_or_default(req.requested_count)),
-                   as_param(req.starting_index)}));
-    if (!rows.has_value()) {
-        return out;
-    }
-
-    auto const row_count = rows->rows();
+    auto rows = exec_params(std::string{"SELECT "} + std::string{track_columns}
+                                + " FROM track WHERE album_id = $1 ORDER BY id LIMIT $2 OFFSET $3",
+                            to_params({as_param(album_id),
+                                       as_param(requested_or_default(req.requested_count)),
+                                       as_param(req.starting_index)}));
+    auto const row_count = rows.rows();
     out.rows.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
-        out.rows.push_back(row_to_track(*rows, r));
+        out.rows.push_back(row_to_track(rows, r));
     }
     return out;
 }
@@ -318,34 +332,29 @@ Page<Track> PostgresRepository::list_all_tracks(PageRequest req) const {
     std::scoped_lock const lock{mutex_};
 
     Page<Track> out;
-    out.total_matches = count_query(*conn_, "SELECT COUNT(*) FROM track");
+    out.total_matches = count("SELECT COUNT(*) FROM track");
 
-    auto rows =
-        conn_->execute_params(std::string{"SELECT "} + std::string{track_columns}
-                                  + " FROM track ORDER BY id LIMIT $1 OFFSET $2",
-                              to_params({as_param(requested_or_default(req.requested_count)),
-                                         as_param(req.starting_index)}));
-    if (!rows.has_value()) {
-        return out;
-    }
-
-    auto const row_count = rows->rows();
+    auto rows = exec_params(std::string{"SELECT "} + std::string{track_columns}
+                                + " FROM track ORDER BY id LIMIT $1 OFFSET $2",
+                            to_params({as_param(requested_or_default(req.requested_count)),
+                                       as_param(req.starting_index)}));
+    auto const row_count = rows.rows();
     out.rows.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
-        out.rows.push_back(row_to_track(*rows, r));
+        out.rows.push_back(row_to_track(rows, r));
     }
     return out;
 }
 
 std::optional<Track> PostgresRepository::get_track(std::string_view id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows = conn_->execute_params(std::string{"SELECT "} + std::string{track_columns}
-                                          + " FROM track WHERE id = $1",
-                                      to_params({as_param(id)}));
-    if (!rows.has_value() || rows->rows() == 0) {
+    auto rows = exec_params(std::string{"SELECT "} + std::string{track_columns}
+                                + " FROM track WHERE id = $1",
+                            to_params({as_param(id)}));
+    if (rows.rows() == 0) {
         return std::nullopt;
     }
-    return row_to_track(*rows, 0);
+    return row_to_track(rows, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -389,18 +398,14 @@ constexpr std::string_view rendition_columns =
 std::vector<sonarium::media::MediaRendition>
 PostgresRepository::list_renditions_for_track(std::string_view track_id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows = conn_->execute_params(std::string{"SELECT "} + std::string{rendition_columns}
-                                          + " FROM media_rendition WHERE track_id = $1 ORDER BY id",
-                                      to_params({as_param(track_id)}));
-    if (!rows.has_value()) {
-        return {};
-    }
-
+    auto rows = exec_params(std::string{"SELECT "} + std::string{rendition_columns}
+                                + " FROM media_rendition WHERE track_id = $1 ORDER BY id",
+                            to_params({as_param(track_id)}));
     std::vector<sonarium::media::MediaRendition> out;
-    auto const row_count = rows->rows();
+    auto const row_count = rows.rows();
     out.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
-        out.push_back(row_to_rendition(*rows, r));
+        out.push_back(row_to_rendition(rows, r));
     }
     return out;
 }
@@ -408,65 +413,52 @@ PostgresRepository::list_renditions_for_track(std::string_view track_id) const {
 std::optional<sonarium::media::MediaRendition>
 PostgresRepository::get_rendition(std::string_view rendition_id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows = conn_->execute_params(std::string{"SELECT "} + std::string{rendition_columns}
-                                          + " FROM media_rendition WHERE id = $1",
-                                      to_params({as_param(rendition_id)}));
-    if (!rows.has_value() || rows->rows() == 0) {
+    auto rows = exec_params(std::string{"SELECT "} + std::string{rendition_columns}
+                                + " FROM media_rendition WHERE id = $1",
+                            to_params({as_param(rendition_id)}));
+    if (rows.rows() == 0) {
         return std::nullopt;
     }
-    return row_to_rendition(*rows, 0);
+    return row_to_rendition(rows, 0);
 }
 
 // ---------------------------------------------------------------------------
 // Playlists
 // ---------------------------------------------------------------------------
 
-namespace {
-
-[[nodiscard]] std::vector<PlaylistItem> load_playlist_items(::asterorm::pg::connection& conn,
-                                                            std::string_view playlist_id) {
-    auto rows = conn.execute_params(
+std::vector<PlaylistItem>
+PostgresRepository::load_playlist_items(std::string_view playlist_id) const {
+    auto rows = exec_params(
         "SELECT track_id, position FROM playlist_item WHERE playlist_id = $1 ORDER BY position",
         to_params({as_param(playlist_id)}));
-    if (!rows.has_value()) {
-        return {};
-    }
-
     std::vector<PlaylistItem> items;
-    auto const row_count = rows->rows();
+    auto const row_count = rows.rows();
     items.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
         PlaylistItem item;
-        item.track_id = get_text(*rows, r, 0);
-        item.position = get_u<std::uint32_t>(*rows, r, 1);
+        item.track_id = get_text(rows, r, 0);
+        item.position = get_u<std::uint32_t>(rows, r, 1);
         items.push_back(std::move(item));
     }
     return items;
 }
 
-} // namespace
-
 Page<Playlist> PostgresRepository::list_playlists(PageRequest req) const {
     std::scoped_lock const lock{mutex_};
 
     Page<Playlist> out;
-    out.total_matches = count_query(*conn_, "SELECT COUNT(*) FROM playlist");
+    out.total_matches = count("SELECT COUNT(*) FROM playlist");
 
-    auto rows =
-        conn_->execute_params("SELECT id, title FROM playlist ORDER BY id LIMIT $1 OFFSET $2",
-                              to_params({as_param(requested_or_default(req.requested_count)),
-                                         as_param(req.starting_index)}));
-    if (!rows.has_value()) {
-        return out;
-    }
-
-    auto const row_count = rows->rows();
+    auto rows = exec_params("SELECT id, title FROM playlist ORDER BY id LIMIT $1 OFFSET $2",
+                            to_params({as_param(requested_or_default(req.requested_count)),
+                                       as_param(req.starting_index)}));
+    auto const row_count = rows.rows();
     out.rows.reserve(static_cast<std::size_t>(row_count));
     for (int r = 0; r < row_count; ++r) {
         Playlist p;
-        p.id = get_text(*rows, r, 0);
-        p.title = get_text(*rows, r, 1);
-        p.items = load_playlist_items(*conn_, p.id);
+        p.id = get_text(rows, r, 0);
+        p.title = get_text(rows, r, 1);
+        p.items = load_playlist_items(p.id);
         out.rows.push_back(std::move(p));
     }
     return out;
@@ -474,15 +466,15 @@ Page<Playlist> PostgresRepository::list_playlists(PageRequest req) const {
 
 std::optional<Playlist> PostgresRepository::get_playlist(std::string_view id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows = conn_->execute_params("SELECT id, title FROM playlist WHERE id = $1",
-                                      to_params({as_param(id)}));
-    if (!rows.has_value() || rows->rows() == 0) {
+    auto rows =
+        exec_params("SELECT id, title FROM playlist WHERE id = $1", to_params({as_param(id)}));
+    if (rows.rows() == 0) {
         return std::nullopt;
     }
     Playlist p;
-    p.id = get_text(*rows, 0, 0);
-    p.title = get_text(*rows, 0, 1);
-    p.items = load_playlist_items(*conn_, p.id);
+    p.id = get_text(rows, 0, 0);
+    p.title = get_text(rows, 0, 1);
+    p.items = load_playlist_items(p.id);
     return p;
 }
 
@@ -492,16 +484,15 @@ std::optional<Playlist> PostgresRepository::get_playlist(std::string_view id) co
 
 std::optional<StorageAsset> PostgresRepository::get_asset(std::string_view asset_id) const {
     std::scoped_lock const lock{mutex_};
-    auto rows =
-        conn_->execute_params("SELECT id, storage_path, mime_type FROM storage_asset WHERE id = $1",
-                              to_params({as_param(asset_id)}));
-    if (!rows.has_value() || rows->rows() == 0) {
+    auto rows = exec_params("SELECT id, storage_path, mime_type FROM storage_asset WHERE id = $1",
+                            to_params({as_param(asset_id)}));
+    if (rows.rows() == 0) {
         return std::nullopt;
     }
     StorageAsset s;
-    s.id = get_text(*rows, 0, 0);
-    s.storage_path = get_text(*rows, 0, 1);
-    s.mime_type = get_text(*rows, 0, 2);
+    s.id = get_text(rows, 0, 0);
+    s.storage_path = get_text(rows, 0, 1);
+    s.mime_type = get_text(rows, 0, 2);
     return s;
 }
 
@@ -511,38 +502,36 @@ std::optional<StorageAsset> PostgresRepository::get_asset(std::string_view asset
 // updating updated_at via NOW().
 // ---------------------------------------------------------------------------
 
-namespace {
-
-[[nodiscard]] std::expected<void, std::string>
-exec_or_error(::asterorm::pg::connection& conn,
-              std::string const& sql,
-              std::vector<std::optional<std::string>> const& params,
-              std::string_view label) {
-    auto res = conn.execute_params(sql, params);
-    if (!res.has_value()) {
-        return std::unexpected(std::string{label} + " failed: " + res.error().message);
+std::expected<void, std::string>
+PostgresRepository::exec_write(std::string_view sql,
+                               std::vector<std::optional<std::string>> const& params,
+                               std::string_view label) {
+    try {
+        if (params.empty()) {
+            (void)exec(sql);
+        } else {
+            (void)exec_params(sql, params);
+        }
+        return {};
+    } catch (RepositoryError const& e) {
+        return std::unexpected(std::string{label} + " failed: " + e.what());
     }
-    return {};
 }
-
-} // namespace
 
 std::expected<void, std::string> PostgresRepository::upsert_artist(Artist const& a) {
     std::scoped_lock const lock{mutex_};
-    return exec_or_error(*conn_,
-                         "INSERT INTO artist (id, name, sort_name) VALUES ($1, $2, $3) "
-                         "ON CONFLICT (id) DO UPDATE SET "
-                         "  name = EXCLUDED.name, "
-                         "  sort_name = EXCLUDED.sort_name, "
-                         "  updated_at = NOW()",
-                         to_params({as_param(a.id), as_param(a.name), as_param(a.sort_name)}),
-                         "upsert_artist");
+    return exec_write("INSERT INTO artist (id, name, sort_name) VALUES ($1, $2, $3) "
+                      "ON CONFLICT (id) DO UPDATE SET "
+                      "  name = EXCLUDED.name, "
+                      "  sort_name = EXCLUDED.sort_name, "
+                      "  updated_at = NOW()",
+                      to_params({as_param(a.id), as_param(a.name), as_param(a.sort_name)}),
+                      "upsert_artist");
 }
 
 std::expected<void, std::string> PostgresRepository::upsert_album(Album const& al) {
     std::scoped_lock const lock{mutex_};
-    return exec_or_error(
-        *conn_,
+    return exec_write(
         "INSERT INTO album (id, artist_id, title, sort_title, release_year, cover_art_asset_id) "
         "VALUES ($1, $2, $3, $4, $5, $6) "
         "ON CONFLICT (id) DO UPDATE SET "
@@ -563,35 +552,33 @@ std::expected<void, std::string> PostgresRepository::upsert_album(Album const& a
 
 std::expected<void, std::string> PostgresRepository::upsert_track(Track const& t) {
     std::scoped_lock const lock{mutex_};
-    return exec_or_error(*conn_,
-                         "INSERT INTO track (id, album_id, artist_id, title, sort_title, "
-                         "                   disc_number, track_number, duration_ms) "
-                         "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
-                         "ON CONFLICT (id) DO UPDATE SET "
-                         "  album_id = EXCLUDED.album_id, "
-                         "  artist_id = EXCLUDED.artist_id, "
-                         "  title = EXCLUDED.title, "
-                         "  sort_title = EXCLUDED.sort_title, "
-                         "  disc_number = EXCLUDED.disc_number, "
-                         "  track_number = EXCLUDED.track_number, "
-                         "  duration_ms = EXCLUDED.duration_ms, "
-                         "  updated_at = NOW()",
-                         to_params({as_param(t.id),
-                                    as_param(t.album_id),
-                                    as_param(t.artist_id),
-                                    as_param(t.title),
-                                    as_param(t.sort_title),
-                                    as_nullable_int(t.disc_number),
-                                    as_nullable_int(t.track_number),
-                                    as_param(t.duration_ms)}),
-                         "upsert_track");
+    return exec_write("INSERT INTO track (id, album_id, artist_id, title, sort_title, "
+                      "                   disc_number, track_number, duration_ms) "
+                      "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
+                      "ON CONFLICT (id) DO UPDATE SET "
+                      "  album_id = EXCLUDED.album_id, "
+                      "  artist_id = EXCLUDED.artist_id, "
+                      "  title = EXCLUDED.title, "
+                      "  sort_title = EXCLUDED.sort_title, "
+                      "  disc_number = EXCLUDED.disc_number, "
+                      "  track_number = EXCLUDED.track_number, "
+                      "  duration_ms = EXCLUDED.duration_ms, "
+                      "  updated_at = NOW()",
+                      to_params({as_param(t.id),
+                                 as_param(t.album_id),
+                                 as_param(t.artist_id),
+                                 as_param(t.title),
+                                 as_param(t.sort_title),
+                                 as_nullable_int(t.disc_number),
+                                 as_nullable_int(t.track_number),
+                                 as_param(t.duration_ms)}),
+                      "upsert_track");
 }
 
 std::expected<void, std::string>
 PostgresRepository::upsert_rendition(sonarium::media::MediaRendition const& m) {
     std::scoped_lock const lock{mutex_};
-    return exec_or_error(
-        *conn_,
+    return exec_write(
         "INSERT INTO media_rendition (id, track_id, codec, container, mime_type, "
         "    bitrate_bps, sample_rate_hz, bit_depth, channels, duration_ms, size_bytes, "
         "    checksum, storage_path, dlna_profile_name, protocol_info, purpose) "
@@ -634,25 +621,21 @@ PostgresRepository::upsert_rendition(sonarium::media::MediaRendition const& m) {
 
 std::expected<void, std::string> PostgresRepository::upsert_asset(StorageAsset const& s) {
     std::scoped_lock const lock{mutex_};
-    return exec_or_error(
-        *conn_,
-        "INSERT INTO storage_asset (id, storage_path, mime_type) "
-        "VALUES ($1, $2, $3) "
-        "ON CONFLICT (id) DO UPDATE SET "
-        "  storage_path = EXCLUDED.storage_path, "
-        "  mime_type = EXCLUDED.mime_type",
-        to_params({as_param(s.id), as_param(s.storage_path), as_param(s.mime_type)}),
-        "upsert_asset");
+    return exec_write("INSERT INTO storage_asset (id, storage_path, mime_type) "
+                      "VALUES ($1, $2, $3) "
+                      "ON CONFLICT (id) DO UPDATE SET "
+                      "  storage_path = EXCLUDED.storage_path, "
+                      "  mime_type = EXCLUDED.mime_type",
+                      to_params({as_param(s.id), as_param(s.storage_path), as_param(s.mime_type)}),
+                      "upsert_asset");
 }
 
 std::expected<void, std::string> PostgresRepository::bump_system_update_id() {
     std::scoped_lock const lock{mutex_};
-    auto res = conn_->execute("UPDATE system_state SET update_counter = update_counter + 1 "
-                              "WHERE key = 'content_directory'");
-    if (!res.has_value()) {
-        return std::unexpected(std::string{"bump_system_update_id failed: "} + res.error().message);
-    }
-    return {};
+    return exec_write("UPDATE system_state SET update_counter = update_counter + 1 "
+                      "WHERE key = 'content_directory'",
+                      {},
+                      "bump_system_update_id");
 }
 
 } // namespace sonarium::catalog

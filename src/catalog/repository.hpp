@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -24,6 +25,15 @@ template <typename T>
 struct Page {
     std::vector<T> rows;
     std::uint32_t total_matches = 0;
+};
+
+// Thrown by repository implementations when the backing store fails (query
+// error, lost connection). Distinct from "no rows": callers must translate it
+// into a UPnP `action_failed` fault or HTTP 500 rather than presenting an
+// empty library. The in-memory repository never throws it.
+class RepositoryError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
 };
 
 // Abstract catalog repository. The DLNA Browse handler depends only on this

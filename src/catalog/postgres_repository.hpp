@@ -30,9 +30,16 @@ namespace sonarium::catalog {
 // Thread-safety: all calls take an internal mutex around the libpq connection
 // (libpq connections are not thread-safe). Replace with the asterorm session +
 // pool when concurrency is needed.
+//
+// Error handling: read methods throw `RepositoryError` when a query fails —
+// never an empty page — so a dropped connection surfaces as a SOAP fault /
+// HTTP 500 instead of an apparently empty library. When constructed via
+// `open()` the repository remembers its conninfo and transparently reconnects
+// once per failed call before giving up.
 class PostgresRepository final : public Repository, public CatalogWriter {
 public:
-    explicit PostgresRepository(std::shared_ptr<::asterorm::pg::connection> conn) noexcept;
+    explicit PostgresRepository(std::shared_ptr<::asterorm::pg::connection> conn,
+                                std::string conninfo = {}) noexcept;
 
     // Apply the schema DDL (idempotent — `CREATE ... IF NOT EXISTS`). Call
     // once at startup before serving traffic. Returns an error result on the
@@ -79,7 +86,27 @@ public:
     std::expected<void, std::string> bump_system_update_id() override;
 
 private:
-    std::shared_ptr<::asterorm::pg::connection> conn_;
+    // Execute with one reconnect-and-retry when the connection has dropped;
+    // throws RepositoryError when the query still fails. Callers hold mutex_.
+    [[nodiscard]] ::asterorm::pg::result exec(std::string_view sql) const;
+    [[nodiscard]] ::asterorm::pg::result
+    exec_params(std::string_view sql, std::vector<std::optional<std::string>> const& params) const;
+    [[nodiscard]] bool try_reconnect() const;
+
+    [[nodiscard]] std::uint32_t count(std::string_view sql) const;
+    [[nodiscard]] std::uint32_t
+    count_params(std::string_view sql, std::vector<std::optional<std::string>> const& params) const;
+    [[nodiscard]] std::vector<PlaylistItem> load_playlist_items(std::string_view playlist_id) const;
+
+    // Write-side adapter: keeps the CatalogWriter expected<> contract by
+    // translating RepositoryError back into an error result.
+    [[nodiscard]] std::expected<void, std::string>
+    exec_write(std::string_view sql,
+               std::vector<std::optional<std::string>> const& params,
+               std::string_view label);
+
+    mutable std::shared_ptr<::asterorm::pg::connection> conn_;
+    std::string conninfo_;
     mutable std::mutex mutex_;
 };
 
