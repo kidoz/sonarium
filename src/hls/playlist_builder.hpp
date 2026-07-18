@@ -19,6 +19,10 @@ struct MediaVariant {
     std::uint32_t bitrate_bps = 0;
     std::uint64_t duration_ms = 0;
     std::string media_url;
+    // Optional "?expires=...&sig=..." appended to the index.m3u8 URL in the
+    // master playlist so token-gated media routes stay reachable. Empty when
+    // media tokens are disabled.
+    std::string index_url_suffix;
 };
 
 // Map the catalog rendition into the HLS variant shape, computing codec_string

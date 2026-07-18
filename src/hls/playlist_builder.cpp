@@ -100,7 +100,9 @@ std::string build_master_playlist(std::span<MediaVariant const> variants,
         out.append(base_url);
         out.append("/hls/renditions/");
         out.append(v.rendition_id);
-        out.append("/index.m3u8\n");
+        out.append("/index.m3u8");
+        out.append(v.index_url_suffix);
+        out.push_back('\n');
     }
     return out;
 }

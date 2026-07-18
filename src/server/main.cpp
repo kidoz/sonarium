@@ -159,6 +159,52 @@ void handle_shutdown_signal(int /*signum*/) {
     return buf.str();
 }
 
+// Every HLS route enforces the same token policy as the direct media route on
+// sonarium-dlna: with signing enabled, a request must carry a valid
+// `?expires=...&sig=...` pair bound to the resource id. Without it, any LAN
+// client could stream transcoded audio — and worse, trigger unauthenticated
+// ffmpeg segmentation jobs.
+[[nodiscard]] bool token_ok(sonarium::core::MediaTokenSigner const& signer,
+                            ::atria::Request& req,
+                            std::string_view resource_id) {
+    if (!signer.enabled()) {
+        return true;
+    }
+    auto const expires = req.query("expires").value_or("");
+    auto const sig = req.query("sig").value_or("");
+    return signer.verify(resource_id, expires, sig);
+}
+
+[[nodiscard]] ::atria::Response forbidden() {
+    return ::atria::Response{::atria::Status::Forbidden};
+}
+
+// Append the rendition-scoped token to each segment line of a cached media
+// playlist so segment requests pass the same gate. Tag lines start with '#'.
+[[nodiscard]] std::string with_signed_segment_urls(std::string const& playlist,
+                                                   std::string const& token_suffix) {
+    if (token_suffix.empty()) {
+        return playlist;
+    }
+    std::string out;
+    out.reserve(playlist.size() + (token_suffix.size() * 16));
+    std::size_t pos = 0;
+    while (pos < playlist.size()) {
+        auto const eol = playlist.find('\n', pos);
+        auto const line_end = (eol == std::string::npos) ? playlist.size() : eol;
+        auto const line = std::string_view{playlist}.substr(pos, line_end - pos);
+        out.append(line);
+        if (!line.empty() && line.front() != '#') {
+            out.append(token_suffix);
+        }
+        if (eol != std::string::npos) {
+            out.push_back('\n');
+        }
+        pos = line_end + 1;
+    }
+    return out;
+}
+
 void register_hls_routes(::atria::Application& app,
                          std::shared_ptr<sonarium::catalog::Repository const> catalog,
                          std::shared_ptr<sonarium::core::MediaTokenSigner const> signer,
@@ -183,6 +229,11 @@ void register_hls_routes(::atria::Application& app,
             if (id.empty()) {
                 return not_found();
             }
+            // Master playlist tokens are bound to the track id; the variant
+            // URLs below carry their own rendition-bound tokens.
+            if (!token_ok(*signer, req, id)) {
+                return forbidden();
+            }
             auto const track = catalog->get_track(id);
             if (!track.has_value()) {
                 return not_found();
@@ -196,7 +247,9 @@ void register_hls_routes(::atria::Application& app,
             for (auto const& r : renditions) {
                 // signer.sign() returns "" when disabled, so unconditional append is safe.
                 auto media_url = media_base_url + "/media/renditions/" + r.id + signer->sign(r.id);
-                variants.push_back(sonarium::hls::variant_from_rendition(r, std::move(media_url)));
+                auto variant = sonarium::hls::variant_from_rendition(r, std::move(media_url));
+                variant.index_url_suffix = signer->sign(r.id);
+                variants.push_back(std::move(variant));
             }
             return m3u8_ok(sonarium::hls::build_master_playlist(variants, self_base_url));
         });
@@ -213,6 +266,11 @@ void register_hls_routes(::atria::Application& app,
             auto const id = req.path_param("id").value_or("");
             if (id.empty()) {
                 return not_found();
+            }
+            // Gate before any catalog lookup or ffmpeg spawn — an untokened
+            // request must not be able to trigger segmentation work.
+            if (!token_ok(*signer, req, id)) {
+                return forbidden();
             }
             auto rendition = catalog->get_rendition(id);
             if (!rendition.has_value()) {
@@ -246,18 +304,23 @@ void register_hls_routes(::atria::Application& app,
             if (!body.has_value()) {
                 return not_found();
             }
-            return m3u8_ok(std::move(*body));
+            return m3u8_ok(with_signed_segment_urls(*body, signer->sign(rendition->id)));
         });
 
     // GET / HEAD /hls/renditions/{id}/{seg} — serve a cached .ts segment.
     // Filename is validated against `seg\d{5}\.ts`; nothing else is allowed.
     // atria::Response::file() handles HEAD natively (no body, same headers)
     // and honors Range, so both verbs share the same lambda.
-    auto segment_handler = [segmenter](::atria::Request& req) -> ::atria::Response {
+    auto segment_handler = [segmenter, signer](::atria::Request& req) -> ::atria::Response {
         auto const id = req.path_param("id").value_or("");
         auto const seg = req.path_param("seg").value_or("");
         if (id.empty() || seg.empty()) {
             return not_found();
+        }
+        // One rendition-bound token covers every segment of that rendition;
+        // the playlist rewrite in the index route hands it to the client.
+        if (!token_ok(*signer, req, id)) {
+            return forbidden();
         }
         auto path = segmenter->cached_file(std::string{id}, seg);
         if (!path.has_value()) {
