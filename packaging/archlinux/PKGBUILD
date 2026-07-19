@@ -6,7 +6,7 @@
 # Catch2 comes from the system package via checkdepends.
 
 pkgname=sonarium
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Self-hosted music streaming: DLNA/UPnP MediaServer and HLS audio server over a Postgres catalog'
 arch=('x86_64' 'aarch64')
