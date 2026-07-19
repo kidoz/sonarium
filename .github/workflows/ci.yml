@@ -36,7 +36,7 @@ jobs:
         run: |
           wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 19
           sudo apt-get install -y --no-install-recommends \
-            meson ninja-build clang-tidy-19 clang-format-19 ffmpeg libpq-dev just
+            meson ninja-build clang-tidy-19 clang-format-19 ffmpeg libpq-dev libsqlite3-dev just
           sudo ln -sf "$(command -v clang-tidy-19)" /usr/local/bin/clang-tidy
           sudo ln -sf "$(command -v clang-format-19)" /usr/local/bin/clang-format
       - name: Gate (format-check + lint)
@@ -67,7 +67,7 @@ jobs:
         run: |
           wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 19
           sudo apt-get install -y --no-install-recommends \
-            meson ninja-build ffmpeg libpq-dev
+            meson ninja-build ffmpeg libpq-dev libsqlite3-dev
       - name: Configure
         run: meson setup buildSan -Db_sanitize=address,undefined -Dbuildtype=debugoptimized
       - name: Tests
@@ -87,7 +87,7 @@ jobs:
         run: |
           wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 19
           sudo apt-get install -y --no-install-recommends \
-            meson ninja-build ffmpeg libpq-dev
+            meson ninja-build ffmpeg libpq-dev libsqlite3-dev
       - name: Configure
         run: meson setup buildTsan -Db_sanitize=thread -Dbuildtype=debugoptimized
       - name: Tests
@@ -119,6 +119,6 @@ jobs:
         run: |
           wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 19
           sudo apt-get install -y --no-install-recommends \
-            meson ninja-build ffmpeg libpq-dev just
+            meson ninja-build ffmpeg libpq-dev libsqlite3-dev just
       - name: Catalog suite against the service container
         run: just test-pg

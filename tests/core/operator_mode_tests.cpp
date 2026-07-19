@@ -103,3 +103,15 @@ TEST_CASE("multiple violations are reported together", "[core][operator_mode]") 
     };
     REQUIRE(check_startup_invariants(inv).size() == 4);
 }
+
+TEST_CASE("a SQLite path satisfies the catalog invariant", "[core][operator_mode]") {
+    StartupInvariants const inv{
+        .bind_host = "192.168.1.10",
+        .media_token_secret = "rotating-32-byte-secret",
+        .pg_conninfo = "",
+        .sqlite_path = "/var/lib/sonarium/catalog.db",
+        .media_root = "/srv/music",
+        .allow_public_bind = false,
+    };
+    REQUIRE(check_startup_invariants(inv).empty());
+}

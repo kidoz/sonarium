@@ -8,8 +8,8 @@
 #include <string_view>
 #include <system_error>
 
+#include "catalog/catalog_factory.hpp"
 #include "catalog/in_memory_repository.hpp"
-#include "catalog/postgres_repository.hpp"
 #include "catalog/repository.hpp"
 #include "cli/dlna_status.hpp"
 #include "cli/http_client.hpp"
@@ -22,18 +22,19 @@
 namespace {
 
 void print_usage(std::string_view argv0) {
-    std::cout << "usage: " << argv0 << " <command> [args]\n"
-              << "commands:\n"
-              << "  version                       — print sonariumctl version\n"
-              << "  import <path>                 — scan <path> into the postgres catalog\n"
-              << "                                  (uses SONARIUM_PG_CONNINFO)\n"
-              << "  scan <path>                   — dry-run preview: walk <path> with an\n"
-              << "                                  in-memory catalog, print the tree, no DB\n"
-              << "  transcode --track-id <id>     — re-encode a track via ffmpeg, write a new\n"
-              << "    [--codec mp3|aac]             rendition row (uses SONARIUM_PG_CONNINFO).\n"
-              << "    [--bitrate <kbps>]            Defaults: codec=mp3, bitrate=128.\n"
-              << "  dlna status [--url URL]       — probe a running sonarium-dlna server\n"
-              << "                                  (URL defaults to http://127.0.0.1:18200)\n";
+    std::cout
+        << "usage: " << argv0 << " <command> [args]\n"
+        << "commands:\n"
+        << "  version                       — print sonariumctl version\n"
+        << "  import <path>                 — scan <path> into the configured catalog\n"
+        << "                                  (SONARIUM_PG_CONNINFO or SONARIUM_SQLITE_PATH)\n"
+        << "  scan <path>                   — dry-run preview: walk <path> with an\n"
+        << "                                  in-memory catalog, print the tree, no DB\n"
+        << "  transcode --track-id <id>     — re-encode a track via ffmpeg, write a new\n"
+        << "    [--codec mp3|aac]             rendition row in the configured catalog.\n"
+        << "    [--bitrate <kbps>]            Defaults: codec=mp3, bitrate=128.\n"
+        << "  dlna status [--url URL]       — probe a running sonarium-dlna server\n"
+        << "                                  (URL defaults to http://127.0.0.1:18200)\n";
 }
 
 [[nodiscard]] std::string env_or(std::string_view name, std::string fallback) {
@@ -44,22 +45,16 @@ void print_usage(std::string_view argv0) {
 }
 
 int cmd_import(std::string_view path) {
-    auto const conninfo = env_or("SONARIUM_PG_CONNINFO", "");
-    if (conninfo.empty()) {
-        std::cerr << "sonariumctl import: SONARIUM_PG_CONNINFO must be set\n";
+    if (!sonarium::catalog::catalog_backend_configured()) {
+        std::cerr << "sonariumctl import: set SONARIUM_PG_CONNINFO or SONARIUM_SQLITE_PATH\n";
         return 2;
     }
-
-    auto repo_result = sonarium::catalog::PostgresRepository::open(conninfo);
-    if (!repo_result.has_value()) {
-        std::cerr << "sonariumctl import: postgres open failed: " << repo_result.error() << '\n';
+    auto opened = sonarium::catalog::open_catalog_from_env();
+    if (!opened.has_value()) {
+        std::cerr << "sonariumctl import: catalog open failed: " << opened.error() << '\n';
         return 3;
     }
-    auto& repo = *repo_result;
-    if (auto schema = repo->ensure_schema(); !schema.has_value()) {
-        std::cerr << "sonariumctl import: ensure_schema failed: " << schema.error() << '\n';
-        return 3;
-    }
+    auto repo = (*opened)->writer;
 
     std::cout << "sonariumctl import: scanning " << path << '\n';
     auto const report = sonarium::scanner::scan(std::filesystem::path{std::string{path}}, *repo);
@@ -167,17 +162,17 @@ int cmd_transcode(std::span<char*> args) {
         return 2;
     }
 
-    auto const conninfo = env_or("SONARIUM_PG_CONNINFO", "");
-    if (conninfo.empty()) {
-        std::cerr << "sonariumctl transcode: SONARIUM_PG_CONNINFO must be set\n";
+    if (!sonarium::catalog::catalog_backend_configured()) {
+        std::cerr << "sonariumctl transcode: set SONARIUM_PG_CONNINFO or SONARIUM_SQLITE_PATH\n";
         return 2;
     }
-    auto repo_result = sonarium::catalog::PostgresRepository::open(conninfo);
-    if (!repo_result.has_value()) {
-        std::cerr << "sonariumctl transcode: postgres open failed: " << repo_result.error() << '\n';
+    auto opened = sonarium::catalog::open_catalog_from_env();
+    if (!opened.has_value()) {
+        std::cerr << "sonariumctl transcode: catalog open failed: " << opened.error() << '\n';
         return 3;
     }
-    auto& repo = *repo_result;
+    auto repo = (*opened)->repository;
+    auto writer = (*opened)->writer;
 
     auto const track = repo->get_track(parsed->track_id);
     if (!track.has_value()) {
@@ -251,11 +246,11 @@ int cmd_transcode(std::span<char*> args) {
     }
     out.purpose = sonarium::media::RenditionPurpose::dlna_lossy;
 
-    if (auto u = repo->upsert_rendition(out); !u.has_value()) {
+    if (auto u = writer->upsert_rendition(out); !u.has_value()) {
         std::cerr << "sonariumctl transcode: upsert_rendition failed: " << u.error() << '\n';
         return 3;
     }
-    if (auto b = repo->bump_system_update_id(); !b.has_value()) {
+    if (auto b = writer->bump_system_update_id(); !b.has_value()) {
         std::cerr << "sonariumctl transcode: bump_system_update_id failed: " << b.error() << '\n';
         return 3;
     }

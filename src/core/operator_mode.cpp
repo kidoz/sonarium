@@ -64,10 +64,10 @@ std::vector<std::string> check_startup_invariants(StartupInvariants const& inv) 
             "served without authentication");
     }
 
-    if (inv.pg_conninfo.empty()) {
+    if (inv.pg_conninfo.empty() && inv.sqlite_path.empty()) {
         violations.emplace_back(
-            "catalog: SONARIUM_PG_CONNINFO is empty — service would fall back to the in-memory "
-            "demo catalog");
+            "catalog: SONARIUM_PG_CONNINFO and SONARIUM_SQLITE_PATH are both empty — service "
+            "would fall back to the in-memory demo catalog");
     }
 
     if (inv.media_root.empty()) {

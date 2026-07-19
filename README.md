@@ -9,7 +9,7 @@
 
 A self-hosted music streaming stack built around DLNA/UPnP discovery and an HLS audio server, written in C++23.
 
-Sonarium imports your local music library, exposes it to DLNA renderers on the LAN, and serves the same catalog as HLS to browsers and modern clients. It is designed to run on a home server alongside a Postgres database.
+Sonarium imports your local music library, exposes it to DLNA renderers on the LAN, and serves the same catalog as HLS to browsers and modern clients. It is designed to run on a home server with either a Postgres database or a single-file SQLite catalog.
 
 ## Components
 
@@ -67,7 +67,7 @@ Sonarium ships with two operator modes selected via `SONARIUM_MODE`:
 - `production`: refuses to start unless safe defaults are in place. Exits non-zero on any of:
   - wildcard bind (`0.0.0.0`, `::`, empty) without `SONARIUM_ALLOW_PUBLIC_BIND=1`
   - empty `SONARIUM_MEDIA_TOKEN_SECRET` (direct media URLs would be unauthenticated)
-  - empty `SONARIUM_PG_CONNINFO` (the demo in-memory catalog must not run in production)
+  - no catalog backend (`SONARIUM_PG_CONNINFO` and `SONARIUM_SQLITE_PATH` both empty — the demo in-memory catalog must not run in production)
   - empty `SONARIUM_MEDIA_ROOT` (served file paths would not be contained to a library root)
   - Postgres connect/schema failure (no silent fallback to the demo catalog)
 
@@ -112,7 +112,8 @@ exceed the bound receive `503` with `Retry-After` instead of queueing.
 | `SONARIUM_ALLOW_PUBLIC_BIND`        | all            | `1` to acknowledge `0.0.0.0` in production                       |
 | `SONARIUM_MEDIA_TOKEN_SECRET`       | dlna / server  | HMAC secret for signed media URLs (empty disables signing)       |
 | `SONARIUM_MEDIA_TOKEN_TTL_SECONDS`  | server         | Token expiry in seconds (default `3600`)                         |
-| `SONARIUM_PG_CONNINFO`              | all            | libpq conninfo. When empty the demo catalog is used (dev only)   |
+| `SONARIUM_PG_CONNINFO`              | all            | libpq conninfo; wins over SQLite when both are set               |
+| `SONARIUM_SQLITE_PATH`              | all            | SQLite catalog file (created on first run). Zero-service alternative to Postgres |
 | `SONARIUM_DLNA_BIND_HOST`           | dlna           | HTTP bind address (default `0.0.0.0`)                            |
 | `SONARIUM_DLNA_HTTP_PORT`           | dlna           | HTTP port (default `8200`)                                       |
 | `SONARIUM_DLNA_ADVERTISED_HOST`     | dlna           | Override the SSDP `LOCATION` host (defaults to LAN auto-detect)  |
@@ -164,6 +165,28 @@ sudo systemctl enable --now sonarium-dlna sonarium-server sonarium-worker
 Each HTTP service exposes `/healthz` (liveness), `/readyz` (catalog
 reachability — 503 when Postgres is down), and `/version` (includes the git
 revision the binary was built from).
+
+## Catalog backends
+
+Two durable catalog backends are supported (the in-memory demo catalog is
+dev-only):
+
+- **SQLite** — set `SONARIUM_SQLITE_PATH=/var/lib/sonarium/catalog.db` and no
+  database service is needed at all. The file is opened in WAL mode so the
+  worker can import while the DLNA/HLS servers read it concurrently. Ideal for
+  single-host home deployments.
+- **Postgres** — set `SONARIUM_PG_CONNINFO`. Verified against Postgres 16, 17,
+  and 18. Takes precedence when both variables are set.
+
+Both run the same schema shape, upsert semantics, and `schema_version`
+migration flow.
+
+```bash
+# whole stack on SQLite, no Docker:
+export SONARIUM_SQLITE_PATH=/tmp/sonarium.db
+just import-sqlite /path/to/music
+just run-sqlite
+```
 
 ## Postgres backend
 

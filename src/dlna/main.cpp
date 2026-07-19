@@ -19,8 +19,8 @@
 #include <string_view>
 #include <vector>
 
+#include "catalog/catalog_factory.hpp"
 #include "catalog/in_memory_repository.hpp"
-#include "catalog/postgres_repository.hpp"
 #include "composition/dlna_server.hpp"
 #include "composition/http_routes.hpp"
 #include "composition/injector.hpp"
@@ -64,26 +64,6 @@ namespace {
     out.write(reinterpret_cast<char const*>(jpeg_skeleton),
               static_cast<std::streamsize>(sizeof(jpeg_skeleton)));
     return path;
-}
-
-// Build a Postgres-backed Repository when SONARIUM_PG_CONNINFO is set; on
-// failure (libpq connect error, ensure_schema error) fall back to the
-// in-memory sample catalog so the server stays serviceable. The fall-through
-// is *intentionally noisy* — the operator wanted Postgres and we couldn't
-// reach it; printing the error to stderr lets `journalctl` or the log tailer
-// surface the misconfiguration.
-[[nodiscard]] std::shared_ptr<sonarium::catalog::Repository>
-try_open_postgres_catalog(std::string_view conninfo) {
-    auto repo = sonarium::catalog::PostgresRepository::open(std::string{conninfo});
-    if (!repo.has_value()) {
-        std::cerr << "  postgres: " << repo.error() << " — falling back to in-memory\n";
-        return nullptr;
-    }
-    if (auto schema = (*repo)->ensure_schema(); !schema.has_value()) {
-        std::cerr << "  postgres: " << schema.error() << " — falling back to in-memory\n";
-        return nullptr;
-    }
-    return *repo;
 }
 
 std::shared_ptr<sonarium::catalog::Repository> sample_catalog() {
@@ -250,6 +230,7 @@ int main(int argc, char** argv) {
     auto signer = std::make_shared<sonarium::core::MediaTokenSigner>(token_secret);
 
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const sqlite_path = env_or("SONARIUM_SQLITE_PATH", "");
     auto const media_root = env_or("SONARIUM_MEDIA_ROOT", "");
     auto const mode = sonarium::core::current_operator_mode();
     auto const allow_public_bind = env_or("SONARIUM_ALLOW_PUBLIC_BIND", "0") != "0";
@@ -257,6 +238,7 @@ int main(int argc, char** argv) {
         .bind_host = bind_host,
         .media_token_secret = token_secret,
         .pg_conninfo = pg_conninfo,
+        .sqlite_path = sqlite_path,
         .media_root = media_root,
         .allow_public_bind = allow_public_bind,
     });
@@ -282,16 +264,19 @@ int main(int argc, char** argv) {
     // the routes still demo without a database.
     std::shared_ptr<sonarium::catalog::Repository> catalog;
     std::string catalog_kind;
-    if (!pg_conninfo.empty()) {
-        catalog = try_open_postgres_catalog(pg_conninfo);
-        if (catalog) {
-            catalog_kind = "postgres";
-        } else if (mode == sonarium::core::OperatorMode::production) {
+    if (auto opened = sonarium::catalog::open_catalog_from_env(); !opened.has_value()) {
+        // Configured backend failed. Noisy fallback in development; fatal in
+        // production, which forbids the in-memory demo catalog.
+        std::cerr << "  catalog: " << opened.error() << " — falling back to in-memory\n";
+        if (mode == sonarium::core::OperatorMode::production) {
             std::cerr << "  FATAL: catalog unavailable and production mode forbids in-memory "
                          "fallback\n";
             logging.registry->flush();
             return 3;
         }
+    } else if (opened->has_value()) {
+        catalog = (*opened)->repository;
+        catalog_kind = (*opened)->kind;
     }
     if (!catalog) {
         catalog = sample_catalog();

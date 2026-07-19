@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-#include "catalog/postgres_repository.hpp"
+#include "catalog/catalog_factory.hpp"
 #include "core/env_config.hpp"
 #include "core/version.hpp"
 #include "scanner/media_scanner.hpp"
@@ -100,9 +100,9 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    auto const conninfo = env_or("SONARIUM_PG_CONNINFO", "");
-    if (conninfo.empty()) {
-        std::cerr << "  SONARIUM_PG_CONNINFO must be set so the worker can write rows\n";
+    if (!sonarium::catalog::catalog_backend_configured()) {
+        std::cerr << "  set SONARIUM_PG_CONNINFO or SONARIUM_SQLITE_PATH so the worker can "
+                     "write rows\n";
         return 2;
     }
 
@@ -116,27 +116,23 @@ int main(int argc, char** argv) {
         std::cerr << "  WARN: " << issue << '\n';
     }
 
-    std::cout << "  root=" << root << '\n' << "  backend=postgres\n";
     if (watch) {
         std::cout << "  mode=watch (max-interval=" << poll_seconds << "s)\n";
     } else {
         std::cout << "  mode=one-shot\n";
     }
 
-    auto repo_result = sonarium::catalog::PostgresRepository::open(conninfo);
-    if (!repo_result.has_value()) {
-        std::cerr << "  postgres open failed: " << repo_result.error() << '\n';
+    auto opened_result = sonarium::catalog::open_catalog_from_env();
+    if (!opened_result.has_value()) {
+        std::cerr << "  catalog open failed: " << opened_result.error() << '\n';
         return 3;
     }
-    auto repo = *repo_result;
-    if (auto schema = repo->ensure_schema(); !schema.has_value()) {
-        std::cerr << "  ensure_schema failed: " << schema.error() << '\n';
-        return 3;
-    }
+    auto writer = (*opened_result)->writer;
+    std::cout << "  root=" << root << '\n' << "  backend=" << (*opened_result)->kind << '\n';
 
     auto run_pass = [&]() -> sonarium::scanner::ScanReport {
         std::cout << "[scan] start\n";
-        auto report = sonarium::scanner::scan(std::filesystem::path{root}, *repo);
+        auto report = sonarium::scanner::scan(std::filesystem::path{root}, *writer);
         std::cout << "[scan] done\n";
         print_report(report);
         return report;

@@ -13,8 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include "catalog/catalog_factory.hpp"
 #include "catalog/in_memory_repository.hpp"
-#include "catalog/postgres_repository.hpp"
 #include "catalog/repository.hpp"
 #include "core/env_config.hpp"
 #include "core/media_token.hpp"
@@ -99,20 +99,6 @@ constexpr std::string_view default_media_base = "http://127.0.0.1:18200";
     return repo;
 }
 
-[[nodiscard]] std::shared_ptr<sonarium::catalog::Repository>
-try_open_postgres_catalog(std::string_view conninfo) {
-    auto repo = sonarium::catalog::PostgresRepository::open(std::string{conninfo});
-    if (!repo.has_value()) {
-        std::cerr << "  postgres: " << repo.error() << " — falling back to in-memory\n";
-        return nullptr;
-    }
-    if (auto schema = (*repo)->ensure_schema(); !schema.has_value()) {
-        std::cerr << "  postgres: " << schema.error() << " — falling back to in-memory\n";
-        return nullptr;
-    }
-    return *repo;
-}
-
 // SIGINT/SIGTERM → Application::shutdown(), which only stores an atomic flag
 // (async-signal-safe). The accept loop notices within its poll interval, so
 // `listen()` returns instead of the process dying mid-request.
@@ -143,6 +129,7 @@ int main() {
                std::string{"http://"} + (bind_host == "0.0.0.0" ? "127.0.0.1" : bind_host) + ":"
                    + std::to_string(http_port));
     auto const pg_conninfo = env_or("SONARIUM_PG_CONNINFO", "");
+    auto const sqlite_path = env_or("SONARIUM_SQLITE_PATH", "");
     auto const media_root = env_or("SONARIUM_MEDIA_ROOT", "");
     auto const segment_cache_root =
         env_or("SONARIUM_HLS_CACHE_DIR",
@@ -175,6 +162,7 @@ int main() {
         .bind_host = bind_host,
         .media_token_secret = token_secret,
         .pg_conninfo = pg_conninfo,
+        .sqlite_path = sqlite_path,
         .media_root = media_root,
         .allow_public_bind = allow_public_bind,
     });
@@ -195,15 +183,16 @@ int main() {
 
     std::shared_ptr<sonarium::catalog::Repository> catalog;
     std::string catalog_kind;
-    if (!pg_conninfo.empty()) {
-        catalog = try_open_postgres_catalog(pg_conninfo);
-        if (catalog) {
-            catalog_kind = "postgres";
-        } else if (mode == sonarium::core::OperatorMode::production) {
+    if (auto opened = sonarium::catalog::open_catalog_from_env(); !opened.has_value()) {
+        std::cerr << "  catalog: " << opened.error() << " — falling back to in-memory\n";
+        if (mode == sonarium::core::OperatorMode::production) {
             std::cerr << "  FATAL: catalog unavailable and production mode forbids in-memory "
                          "fallback\n";
             return 3;
         }
+    } else if (opened->has_value()) {
+        catalog = (*opened)->repository;
+        catalog_kind = (*opened)->kind;
     }
     if (!catalog) {
         catalog = sample_catalog_with_track();

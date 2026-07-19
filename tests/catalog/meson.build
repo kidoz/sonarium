@@ -3,6 +3,7 @@ catalog_tests = executable(
     files(
         'in_memory_repository_tests.cpp',
         'postgres_repository_tests.cpp',
+        'sqlite_repository_tests.cpp',
     ),
     dependencies : [
         sonarium_module_deps['catalog'],
@@ -22,4 +23,5 @@ test(
 sonarium_lint_sources += files(
     'in_memory_repository_tests.cpp',
     'postgres_repository_tests.cpp',
+    'sqlite_repository_tests.cpp',
 )

@@ -311,6 +311,20 @@ import path: build
     SONARIUM_PG_CONNINFO="{{pg_conninfo}}" \
         ./{{build_dir}}/src/cli/sonariumctl import "{{path}}"
 
+# SQLite catalog file used by the `*-sqlite` recipes. Override via env.
+sqlite_path := env_var_or_default("SONARIUM_SQLITE_PATH", "/tmp/sonarium.db")
+
+# Scan a media root into a SQLite catalog file — no Docker/Postgres needed.
+import-sqlite path: build
+    SONARIUM_SQLITE_PATH="{{sqlite_path}}" \
+        ./{{build_dir}}/src/cli/sonariumctl import "{{path}}"
+
+# Run the DLNA service against the SQLite catalog.
+run-sqlite port=default_port: build
+    SONARIUM_SQLITE_PATH="{{sqlite_path}}" \
+    SONARIUM_DLNA_HTTP_PORT={{port}} \
+        ./{{build_dir}}/src/dlna/sonarium-dlna
+
 # Same scan via the worker binary (uses --root or SONARIUM_MEDIA_ROOT).
 worker path: build
     SONARIUM_PG_CONNINFO="{{pg_conninfo}}" \

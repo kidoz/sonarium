@@ -22,7 +22,9 @@ enum class OperatorMode : std::uint8_t { development, production };
 struct StartupInvariants {
     std::string_view bind_host;
     std::string_view media_token_secret;
+    // Durable catalog backends — production requires at least one of these.
     std::string_view pg_conninfo;
+    std::string_view sqlite_path;
     // SONARIUM_MEDIA_ROOT — library root that served file paths must resolve
     // into. Empty disables containment, which is a violation in production.
     std::string_view media_root;

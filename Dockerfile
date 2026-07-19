@@ -13,7 +13,7 @@ FROM ubuntu:24.04 AS build
 # lacks std::expected (needs __cpp_concepts >= 202002L, clang 19+).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential git ca-certificates \
-        meson ninja-build pkg-config libpq-dev \
+        meson ninja-build pkg-config libpq-dev libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -27,7 +27,7 @@ RUN meson setup build --buildtype=release -Db_lto=true -Ddefault_library=static 
 FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libpq5 curl ca-certificates \
+        ffmpeg libpq5 libsqlite3-0 curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --create-home --shell /usr/sbin/nologin sonarium
 
