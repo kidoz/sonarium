@@ -1,0 +1,78 @@
+# Maintainer: Aleksandr Pavlov <kidoz@gmail.com>
+#
+# The Meson wraps (atria/ctorwire/logspine/asterorm) are declared as pinned
+# git sources and pre-seeded into subprojects/ in prepare(), so build() runs
+# without network access — the revisions below must match subprojects/*.wrap.
+# Catch2 comes from the system package via checkdepends.
+
+pkgname=sonarium
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Self-hosted music streaming: DLNA/UPnP MediaServer and HLS audio server over a Postgres catalog'
+arch=('x86_64' 'aarch64')
+url='https://github.com/kidoz/sonarium'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'postgresql-libs' 'ffmpeg')
+makedepends=('git' 'meson' 'ninja')
+checkdepends=('catch2')
+optdepends=('postgresql: run the catalog database on the same host')
+source=("$pkgname::git+$url.git#tag=v$pkgver"
+        'atria::git+https://github.com/kidoz/atria.git#commit=ef7173d728c05df3933cc3043217fd75f3717cd4'
+        'ctorwire::git+https://github.com/kidoz/ctorwire.git#commit=b0adf844e5d4c48f90f92a9818e298079a8285a5'
+        'logspine::git+https://github.com/kidoz/logspine.git#commit=c6dcb3ac9ec5fafe71dffabbfedab4c18d040972'
+        'asterorm::git+https://github.com/kidoz/asterorm.git#commit=ee3dab4af6a29bdfe718e0851adcf3042350938b'
+        'sonarium.sysusers')
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'c643d4f303a5596199545834428c4d5abc37171fe20114b1dc003eafd720992e')
+
+prepare() {
+    cd "$pkgname"
+    # Pre-seed the wrap subprojects from the pinned checkouts makepkg fetched;
+    # Meson uses an existing subprojects/<name> dir instead of downloading.
+    local dep
+    for dep in atria ctorwire logspine asterorm; do
+        rm -rf "subprojects/$dep"
+        cp -a "$srcdir/$dep" "subprojects/$dep"
+    done
+}
+
+build() {
+    # Static default keeps the vendored wraps inside the binaries; asterorm
+    # forces shared libraries regardless, so those .so files still ship.
+    arch-meson "$pkgname" build -Ddefault_library=static
+    meson compile -C build
+}
+
+check() {
+    meson test -C build --print-errorlogs --timeout-multiplier 3 \
+        --suite=core --suite=media --suite=catalog --suite=scanner --suite=dlna-core \
+        --suite=upnp --suite=composition --suite=transcode --suite=hls --suite=server \
+        --suite=worker --suite=cli --suite=smoke
+}
+
+package() {
+    meson install -C build --destdir "$pkgdir"
+
+    # The vendored wrap subprojects install their dev files and example
+    # binaries alongside sonarium; ship only what the sonarium binaries need
+    # at runtime. Static archives are never needed after linking; any .so a
+    # wrap insists on building stays.
+    rm -rf "$pkgdir/usr/include" "$pkgdir/usr/lib/cmake" "$pkgdir/usr/lib/pkgconfig"
+    rm -f "$pkgdir"/usr/bin/atria-* "$pkgdir"/usr/lib/*.a
+    rmdir --ignore-fail-on-non-empty "$pkgdir/usr/lib" 2>/dev/null || true
+
+    install -Dm644 "$pkgname"/packaging/systemd/sonarium-{dlna,server,worker}.service \
+        -t "$pkgdir/usr/lib/systemd/system/"
+    install -Dm644 sonarium.sysusers "$pkgdir/usr/lib/sysusers.d/sonarium.conf"
+
+    install -Dm644 "$pkgname/packaging/systemd/sonarium.env.example" \
+        -t "$pkgdir/usr/share/doc/$pkgname/"
+    install -Dm644 "$pkgname/README.md" "$pkgname/CHANGELOG.md" \
+        -t "$pkgdir/usr/share/doc/$pkgname/"
+
+    install -Dm644 "$pkgname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
