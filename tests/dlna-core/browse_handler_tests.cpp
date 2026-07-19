@@ -225,7 +225,7 @@ TEST_CASE("Track items carry upnp:albumArtURI when album has cover art",
 
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://lan.invalid:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://lan.invalid:8200"};
 
     auto const r = handle_browse(browse_request("album:1"), ctx);
     REQUIRE(r.has_value());
