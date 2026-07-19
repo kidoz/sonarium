@@ -89,7 +89,7 @@ TEST_CASE("Browse(0, BrowseDirectChildren) returns Music + Playlists", "[dlna][b
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("0"), ctx);
     REQUIRE(r.has_value());
@@ -103,7 +103,7 @@ TEST_CASE("Browse(0, BrowseMetadata) returns the root container", "[dlna][browse
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("0", "BrowseMetadata"), ctx);
     REQUIRE(r.has_value());
@@ -115,7 +115,7 @@ TEST_CASE("Browse(artists) lists artist containers", "[dlna][browse]") {
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("artists"), ctx);
     REQUIRE(r.has_value());
@@ -129,7 +129,7 @@ TEST_CASE("Browse(album:1) lists track items with resources", "[dlna][browse]") 
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("album:1"), ctx);
     REQUIRE(r.has_value());
@@ -146,7 +146,7 @@ TEST_CASE("Browse(album:1) honors pagination", "[dlna][browse]") {
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("album:1", "BrowseDirectChildren", "1", "1"), ctx);
     REQUIRE(r.has_value());
@@ -160,7 +160,7 @@ TEST_CASE("Browse for unknown artist returns no_such_object", "[dlna][browse]") 
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("artist:404"), ctx);
     REQUIRE_FALSE(r.has_value());
@@ -171,7 +171,7 @@ TEST_CASE("Browse with malformed ObjectID returns no_such_object", "[dlna][brows
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("garbage:42"), ctx);
     REQUIRE_FALSE(r.has_value());
@@ -182,7 +182,7 @@ TEST_CASE("Browse without ObjectID returns invalid_args", "[dlna][browse]") {
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     ParsedSoapRequest req;
     req.service_urn = "urn:schemas-upnp-org:service:ContentDirectory:1";
@@ -196,7 +196,7 @@ TEST_CASE("Non-Browse action is rejected", "[dlna][browse]") {
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto req = browse_request("0");
     req.action = "Search";
@@ -209,7 +209,7 @@ TEST_CASE("Track items carry duration on each <res>", "[dlna][browse]") {
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("track:1", "BrowseMetadata"), ctx);
     REQUIRE(r.has_value());
@@ -238,7 +238,7 @@ TEST_CASE("Track items omit upnp:albumArtURI when album has no cover art",
     auto repo = sample_repo();
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& profile = reg.match(RequestHeaders{"VLC/3", {}});
-    BrowseContext ctx{&repo, &profile, "http://h:8200"};
+    BrowseContext const ctx{&repo, &profile, "http://h:8200"};
 
     auto const r = handle_browse(browse_request("album:1"), ctx);
     REQUIRE(r.has_value());

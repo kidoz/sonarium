@@ -121,7 +121,7 @@ TEST_CASE("Selector preserves attribute fields when present", "[dlna][resource_s
 TEST_CASE("Empty rendition list returns empty selection", "[dlna][resource_selector]") {
     auto const reg = DeviceProfileRegistry::with_defaults();
     auto const& generic = reg.match(RequestHeaders{"u", {}});
-    ResourceSelectionContext ctx;
+    ResourceSelectionContext const ctx;
     auto const out = select_resources(std::vector<MediaRendition>{}, generic, ctx);
     REQUIRE(out.empty());
 }

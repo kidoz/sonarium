@@ -73,7 +73,7 @@ public:
                 }
                 return false;
             }
-            if (rc > 0 && (pfd.revents & POLLIN)) {
+            if (rc > 0 && (pfd.revents & POLLIN) != 0) {
                 drain_events();
                 return true;
             }

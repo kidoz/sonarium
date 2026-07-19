@@ -53,7 +53,7 @@ TEST_CASE("Default registry exposes all expected profiles", "[dlna][profile]") {
 
 TEST_CASE("VLC user-agent matches VLC/Kodi profile", "[dlna][profile]") {
     auto const reg = DeviceProfileRegistry::with_defaults();
-    RequestHeaders h{"VLC/3.0.20 LibVLC/3.0.20", {}};
+    RequestHeaders const h{"VLC/3.0.20 LibVLC/3.0.20", {}};
     REQUIRE(reg.match(h).name == "VLC/Kodi");
 }
 

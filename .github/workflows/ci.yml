@@ -47,10 +47,12 @@ jobs:
 
   macos:
     name: build + tests (macOS)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Select newest Xcode (std::jthread needs a current libc++)
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
       - name: Install toolchain
         run: brew install meson ninja just ffmpeg libpq
       - name: Tests
@@ -69,7 +71,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             meson ninja-build ffmpeg libpq-dev libsqlite3-dev
       - name: Configure
-        run: meson setup buildSan -Db_sanitize=address,undefined -Dbuildtype=debugoptimized -Ddefault_library=static
+        run: meson setup buildSan -Db_sanitize=address,undefined -Db_lundef=false -Dbuildtype=debugoptimized -Ddefault_library=static
       - name: Tests
         run: |
           meson test -C buildSan --timeout-multiplier 4 --print-errorlogs \
@@ -90,7 +92,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             meson ninja-build ffmpeg libpq-dev libsqlite3-dev
       - name: Configure
-        run: meson setup buildTsan -Db_sanitize=thread -Dbuildtype=debugoptimized -Ddefault_library=static
+        run: meson setup buildTsan -Db_sanitize=thread -Db_lundef=false -Dbuildtype=debugoptimized -Ddefault_library=static
       - name: Tests
         run: |
           meson test -C buildTsan --timeout-multiplier 4 --print-errorlogs \
