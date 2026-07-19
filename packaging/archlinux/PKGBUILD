@@ -67,6 +67,9 @@ package() {
 
     install -Dm644 "$pkgname"/packaging/systemd/sonarium-{dlna,server,worker}.service \
         -t "$pkgdir/usr/lib/systemd/system/"
+    # The shipped units target /usr/local/bin for manual `meson install`
+    # deployments; this package installs the binaries to /usr/bin.
+    sed -i 's|/usr/local/bin/|/usr/bin/|' "$pkgdir"/usr/lib/systemd/system/sonarium-*.service
     install -Dm644 sonarium.sysusers "$pkgdir/usr/lib/sysusers.d/sonarium.conf"
 
     install -Dm644 "$pkgname/packaging/systemd/sonarium.env.example" \

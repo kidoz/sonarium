@@ -5,23 +5,39 @@ After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=exec
 User=sonarium
 Group=sonarium
 EnvironmentFile=/etc/sonarium/sonarium.env
 ExecStart=/usr/local/bin/sonarium-worker --watch
 Restart=on-failure
 RestartSec=5
+# Exit 2 is refuse-to-start on bad configuration — restarting cannot help.
+RestartPreventExitStatus=2
 
-# Hardening. The worker only reads the library and writes to Postgres.
+# Hardening. The worker reads the library, runs ffprobe on it, and writes
+# only to Postgres; @system-service permits the fork/exec ffprobe needs.
+# NOTE: a library under /home needs ProtectHome=read-only (or a
+# BindReadOnlyPaths= entry) instead of ProtectHome=true.
 NoNewPrivileges=true
+CapabilityBoundingSet=
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
 RestrictSUIDSGID=true
-ReadOnlyPaths=/srv/music
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+RemoveIPC=true
+SystemCallFilter=@system-service
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target
