@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -28,8 +29,8 @@ extern "C" void handle_signal(int /*signum*/) {
 }
 
 void install_signal_handlers() {
-    std::signal(SIGINT, &handle_signal);
-    std::signal(SIGTERM, &handle_signal);
+    (void)std::signal(SIGINT, &handle_signal);
+    (void)std::signal(SIGTERM, &handle_signal);
 }
 
 [[nodiscard]] std::string env_or(std::string_view name, std::string fallback) {
@@ -50,12 +51,9 @@ void install_signal_handlers() {
 }
 
 [[nodiscard]] bool has_flag(std::span<char* const> args, std::string_view flag) noexcept {
-    for (auto const* a : args.subspan(1)) {
-        if (std::strcmp(a, std::string{flag}.c_str()) == 0) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(args.subspan(1), [flag](char const* a) {
+        return std::strcmp(a, std::string{flag}.c_str()) == 0;
+    });
 }
 
 void print_report(sonarium::scanner::ScanReport const& r) {
@@ -85,7 +83,7 @@ void print_report(sonarium::scanner::ScanReport const& r) {
 } // namespace
 
 int main(int argc, char** argv) {
-    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+    (void)std::setvbuf(stdout, nullptr, _IOLBF, 0);
     install_signal_handlers();
 
     auto args = std::span<char* const>(argv, static_cast<std::size_t>(argc));

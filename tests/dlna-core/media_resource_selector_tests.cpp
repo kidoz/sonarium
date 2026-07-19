@@ -99,7 +99,7 @@ TEST_CASE("DLNA.ORG_PN omitted when profile says so", "[dlna][resource_selector]
     ctx.base_url = "http://h:8200";
     auto const out = select_resources(renditions, vlc, ctx);
     REQUIRE(out.size() == 1);
-    REQUIRE(out[0].protocol_info.find("DLNA.ORG_PN=") == std::string::npos);
+    REQUIRE(!out[0].protocol_info.contains("DLNA.ORG_PN="));
 }
 
 TEST_CASE("Selector preserves attribute fields when present", "[dlna][resource_selector]") {

@@ -124,7 +124,7 @@ ScanReport scan(fs::path const& root, CatalogWriter& writer) {
         };
 
     fs::recursive_directory_iterator it{root, fs::directory_options::skip_permission_denied, ec};
-    fs::recursive_directory_iterator end;
+    fs::recursive_directory_iterator const end;
     if (ec) {
         report.errors.emplace_back("failed to open scan root: " + ec.message());
         return report;

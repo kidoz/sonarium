@@ -442,7 +442,7 @@ std::expected<ParsedSoapRequest, SoapParseError> parse_soap_request(std::string_
         return std::unexpected(SoapParseError::empty);
     }
 
-    std::size_t pos = 0;
+    std::size_t const pos = 0;
     auto envelope = read_open_tag(stripped, pos);
     if (!envelope
         || (local_name(envelope->qname) != "Envelope"

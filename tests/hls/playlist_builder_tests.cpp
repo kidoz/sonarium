@@ -58,20 +58,20 @@ TEST_CASE("build_media_playlist emits VOD playlist with single segment", "[hls][
     auto const m3u8 = sonarium::hls::build_media_playlist(v);
 
     REQUIRE(m3u8.starts_with("#EXTM3U\n"));
-    REQUIRE(m3u8.find("#EXT-X-VERSION:3") != std::string::npos);
-    REQUIRE(m3u8.find("#EXT-X-PLAYLIST-TYPE:VOD") != std::string::npos);
-    REQUIRE(m3u8.find("#EXT-X-TARGETDURATION:240") != std::string::npos);
-    REQUIRE(m3u8.find("#EXTINF:240.000,") != std::string::npos);
-    REQUIRE(m3u8.find("http://media.example/r1\n") != std::string::npos);
-    REQUIRE(m3u8.find("#EXT-X-ENDLIST\n") != std::string::npos);
+    REQUIRE(m3u8.contains("#EXT-X-VERSION:3"));
+    REQUIRE(m3u8.contains("#EXT-X-PLAYLIST-TYPE:VOD"));
+    REQUIRE(m3u8.contains("#EXT-X-TARGETDURATION:240"));
+    REQUIRE(m3u8.contains("#EXTINF:240.000,"));
+    REQUIRE(m3u8.contains("http://media.example/r1\n"));
+    REQUIRE(m3u8.contains("#EXT-X-ENDLIST\n"));
 }
 
 TEST_CASE("build_media_playlist rounds target-duration up for sub-second remainders",
           "[hls][playlist]") {
     auto const v = make_variant("r1", "audio/mpeg", "", 128'000, 240'500, "http://x/r1");
     auto const m3u8 = sonarium::hls::build_media_playlist(v);
-    REQUIRE(m3u8.find("#EXT-X-TARGETDURATION:241") != std::string::npos);
-    REQUIRE(m3u8.find("#EXTINF:240.500,") != std::string::npos);
+    REQUIRE(m3u8.contains("#EXT-X-TARGETDURATION:241"));
+    REQUIRE(m3u8.contains("#EXTINF:240.500,"));
 }
 
 TEST_CASE("build_master_playlist lists every variant with bandwidth", "[hls][playlist]") {
@@ -83,11 +83,8 @@ TEST_CASE("build_master_playlist lists every variant with bandwidth", "[hls][pla
         std::span<sonarium::hls::MediaVariant const>{variants}, "http://server.example");
 
     REQUIRE(m3u8.starts_with("#EXTM3U\n"));
-    REQUIRE(m3u8.find("#EXT-X-STREAM-INF:BANDWIDTH=320000\n") != std::string::npos);
-    REQUIRE(m3u8.find("http://server.example/hls/renditions/r-mp3/index.m3u8\n")
-            != std::string::npos);
-    REQUIRE(m3u8.find("#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS=\"mp4a.40.2\"\n")
-            != std::string::npos);
-    REQUIRE(m3u8.find("http://server.example/hls/renditions/r-aac/index.m3u8\n")
-            != std::string::npos);
+    REQUIRE(m3u8.contains("#EXT-X-STREAM-INF:BANDWIDTH=320000\n"));
+    REQUIRE(m3u8.contains("http://server.example/hls/renditions/r-mp3/index.m3u8\n"));
+    REQUIRE(m3u8.contains("#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS=\"mp4a.40.2\"\n"));
+    REQUIRE(m3u8.contains("http://server.example/hls/renditions/r-aac/index.m3u8\n"));
 }

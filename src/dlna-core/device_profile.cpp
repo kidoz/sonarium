@@ -1,5 +1,6 @@
 #include "dlna-core/device_profile.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 #include <string_view>
@@ -166,12 +167,8 @@ std::string_view mime_for(DeviceProfile const& profile,
 
 bool profile_supports_codec(DeviceProfile const& profile,
                             sonarium::media::AudioCodec codec) noexcept {
-    for (auto c : profile.preferred_codec_order) {
-        if (c == codec) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(profile.preferred_codec_order,
+                               [codec](sonarium::media::AudioCodec c) { return c == codec; });
 }
 
 DeviceProfileRegistry DeviceProfileRegistry::with_defaults() {

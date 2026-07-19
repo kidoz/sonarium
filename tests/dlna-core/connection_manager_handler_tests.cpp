@@ -19,10 +19,10 @@ TEST_CASE("Generic profile lists MP3, AAC, WAV", "[dlna][connection_manager]") {
     auto const cat = default_protocol_info_catalog();
     auto const result = build_protocol_info_for(generic, cat);
 
-    REQUIRE(result.source.find("audio/mpeg") != std::string::npos);
-    REQUIRE(result.source.find("audio/mp4") != std::string::npos);
-    REQUIRE(result.source.find("audio/wav") != std::string::npos);
-    REQUIRE(result.source.find("audio/flac") == std::string::npos);
+    REQUIRE(result.source.contains("audio/mpeg"));
+    REQUIRE(result.source.contains("audio/mp4"));
+    REQUIRE(result.source.contains("audio/wav"));
+    REQUIRE(!result.source.contains("audio/flac"));
     REQUIRE(result.sink.empty());
 }
 
@@ -32,8 +32,8 @@ TEST_CASE("VLC/Kodi profile exposes FLAC and omits DLNA.ORG_PN", "[dlna][connect
     auto const cat = default_protocol_info_catalog();
     auto const result = build_protocol_info_for(vlc, cat);
 
-    REQUIRE(result.source.find("audio/flac") != std::string::npos);
-    REQUIRE(result.source.find("DLNA.ORG_PN=") == std::string::npos);
+    REQUIRE(result.source.contains("audio/flac"));
+    REQUIRE(!result.source.contains("DLNA.ORG_PN="));
 }
 
 TEST_CASE("Samsung profile keeps DLNA.ORG_PN and omits FLAC", "[dlna][connection_manager]") {
@@ -42,8 +42,8 @@ TEST_CASE("Samsung profile keeps DLNA.ORG_PN and omits FLAC", "[dlna][connection
     auto const cat = default_protocol_info_catalog();
     auto const result = build_protocol_info_for(samsung, cat);
 
-    REQUIRE(result.source.find("DLNA.ORG_PN=MP3") != std::string::npos);
-    REQUIRE(result.source.find("audio/flac") == std::string::npos);
+    REQUIRE(result.source.contains("DLNA.ORG_PN=MP3"));
+    REQUIRE(!result.source.contains("audio/flac"));
 }
 
 TEST_CASE("CSV order matches profile preferred_codec_order", "[dlna][connection_manager]") {
@@ -75,7 +75,7 @@ TEST_CASE("Handler returns Source/Sink pair for valid request", "[dlna][connecti
     REQUIRE(result.has_value());
     REQUIRE(result->size() == 2);
     REQUIRE(result->at(0).first == "Source");
-    REQUIRE(result->at(0).second.find("audio/flac") != std::string::npos);
+    REQUIRE(result->at(0).second.contains("audio/flac"));
     REQUIRE(result->at(1).first == "Sink");
     REQUIRE(result->at(1).second.empty());
 }

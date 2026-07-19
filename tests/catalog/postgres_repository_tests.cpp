@@ -6,7 +6,6 @@
 #include "catalog/postgres_repository.hpp"
 #include "catalog/postgres_schema.hpp"
 
-using sonarium::catalog::Artist;
 using sonarium::catalog::PageRequest;
 using sonarium::catalog::PostgresRepository;
 
@@ -86,7 +85,7 @@ TEST_CASE("PostgresRepository round-trips every entity type", "[catalog][postgre
 
     // Use a second connection for fixture writes so the test can read via
     // the Repository under test without sharing transaction state.
-    ::asterorm::pg::driver driver;
+    ::asterorm::pg::driver const driver;
     auto fixture_conn_result = driver.connect(conninfo);
     REQUIRE(fixture_conn_result.has_value());
     auto& conn = *fixture_conn_result;
@@ -236,7 +235,7 @@ TEST_CASE("ensure_schema records the schema version", "[catalog][postgres]") {
     REQUIRE(repo.has_value());
     REQUIRE((*repo)->ensure_schema().has_value());
 
-    ::asterorm::pg::driver driver;
+    ::asterorm::pg::driver const driver;
     auto conn = driver.connect(conninfo);
     REQUIRE(conn.has_value());
     auto rows = conn->execute("SELECT MAX(version) FROM schema_version");

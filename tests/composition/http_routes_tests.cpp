@@ -114,7 +114,8 @@ namespace {
 </s:Envelope>)";
 }
 
-[[nodiscard]] std::unique_ptr<::atria::Application> build_app(std::shared_ptr<Repository> repo) {
+[[nodiscard]] std::unique_ptr<::atria::Application>
+build_app(const std::shared_ptr<Repository>& repo) {
     auto server = make_dlna_server(repo, sample_config());
     auto app = std::make_unique<::atria::Application>();
     register_dlna_routes(*app,
@@ -135,9 +136,9 @@ TEST_CASE("GET /description.xml returns the device description", "[composition][
     auto const res = app->dispatch(req);
 
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>")
-            != std::string::npos);
-    REQUIRE(res.body().find("<friendlyName>Sonarium</friendlyName>") != std::string::npos);
+    REQUIRE(
+        res.body().contains("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>"));
+    REQUIRE(res.body().contains("<friendlyName>Sonarium</friendlyName>"));
 }
 
 TEST_CASE("HEAD /description.xml returns no body but the right Content-Type",
@@ -159,8 +160,8 @@ TEST_CASE("GET /ContentDirectory/scpd.xml returns the SCPD", "[composition][http
     auto const res = app->dispatch(req);
 
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("<name>Browse</name>") != std::string::npos);
-    REQUIRE(res.body().find("<name>GetSystemUpdateID</name>") != std::string::npos);
+    REQUIRE(res.body().contains("<name>Browse</name>"));
+    REQUIRE(res.body().contains("<name>GetSystemUpdateID</name>"));
 }
 
 TEST_CASE("GET /ConnectionManager/scpd.xml returns the SCPD", "[composition][http]") {
@@ -169,8 +170,8 @@ TEST_CASE("GET /ConnectionManager/scpd.xml returns the SCPD", "[composition][htt
     auto const res = app->dispatch(req);
 
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("<name>GetProtocolInfo</name>") != std::string::npos);
-    REQUIRE(res.body().find("<name>SourceProtocolInfo</name>") != std::string::npos);
+    REQUIRE(res.body().contains("<name>GetProtocolInfo</name>"));
+    REQUIRE(res.body().contains("<name>SourceProtocolInfo</name>"));
 }
 
 TEST_CASE("POST /upnp/control/content-directory dispatches Browse", "[composition][http]") {
@@ -180,17 +181,16 @@ TEST_CASE("POST /upnp/control/content-directory dispatches Browse", "[compositio
     auto const res = app->dispatch(req);
 
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("<u:BrowseResponse xmlns:u=\""
-                            "urn:schemas-upnp-org:service:ContentDirectory:1\">")
-            != std::string::npos);
-    REQUIRE(res.body().find("<NumberReturned>2</NumberReturned>") != std::string::npos);
-    REQUIRE(res.body().find("&lt;DIDL-Lite") != std::string::npos);
+    REQUIRE(res.body().contains("<u:BrowseResponse xmlns:u=\""
+                                "urn:schemas-upnp-org:service:ContentDirectory:1\">"));
+    REQUIRE(res.body().contains("<NumberReturned>2</NumberReturned>"));
+    REQUIRE(res.body().contains("&lt;DIDL-Lite"));
 }
 
 TEST_CASE("POST /upnp/control/connection-manager dispatches GetProtocolInfo",
           "[composition][http]") {
     auto app = build_app();
-    auto const body = R"(<?xml version="1.0"?>
+    const auto* const body = R"(<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
   <s:Body>
     <u:GetProtocolInfo xmlns:u="urn:schemas-upnp-org:service:ConnectionManager:1"/>
@@ -200,10 +200,9 @@ TEST_CASE("POST /upnp/control/connection-manager dispatches GetProtocolInfo",
     auto const res = app->dispatch(req);
 
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("<u:GetProtocolInfoResponse xmlns:u=\""
-                            "urn:schemas-upnp-org:service:ConnectionManager:1\">")
-            != std::string::npos);
-    REQUIRE(res.body().find("audio/mpeg") != std::string::npos);
+    REQUIRE(res.body().contains("<u:GetProtocolInfoResponse xmlns:u=\""
+                                "urn:schemas-upnp-org:service:ConnectionManager:1\">"));
+    REQUIRE(res.body().contains("audio/mpeg"));
 }
 
 TEST_CASE("Unknown path returns 404", "[composition][http]") {
@@ -366,7 +365,7 @@ namespace {
     auto repo = std::make_shared<InMemoryRepository>();
 
     Album al;
-    al.id = album_id;
+    al.id = std::move(album_id);
     al.title = "Cover Album";
     al.cover_art_asset_id = asset_id;
     repo->add_album(al);
@@ -463,7 +462,7 @@ TEST_CASE("Operational probes respond on the DLNA server", "[composition][http]"
     auto version_req = make_request(::atria::Method::Get, "/version");
     auto const version_res = app->dispatch(version_req);
     REQUIRE(version_res.status() == ::atria::Status::Ok);
-    REQUIRE(version_res.body().find("Sonarium DLNA") != std::string::npos);
+    REQUIRE(version_res.body().contains("Sonarium DLNA"));
 
     auto health_req = make_request(::atria::Method::Get, "/healthz");
     REQUIRE(app->dispatch(health_req).status() == ::atria::Status::Ok);

@@ -10,7 +10,7 @@
 namespace {
 
 [[nodiscard]] bool argv_contains(std::vector<std::string> const& argv, std::string_view needle) {
-    return std::any_of(argv.begin(), argv.end(), [&](auto const& s) { return s == needle; });
+    return std::ranges::any_of(argv, [&](auto const& s) { return s == needle; });
 }
 
 [[nodiscard]] std::string argv_value_after(std::vector<std::string> const& argv,

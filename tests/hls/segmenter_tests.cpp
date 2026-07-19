@@ -102,7 +102,7 @@ TEST_CASE("build_segmenter_argv falls back to cfg default when override is zero"
 TEST_CASE("Segmenter::cached_file rejects unsafe rendition ids", "[hls][segmenter]") {
     sonarium::hls::SegmenterConfig cfg;
     cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-test-cache";
-    sonarium::hls::Segmenter s{cfg};
+    sonarium::hls::Segmenter const s{cfg};
     REQUIRE_FALSE(s.cached_file("../etc", "index.m3u8").has_value());
     REQUIRE_FALSE(s.cached_file("a/b", "index.m3u8").has_value());
     REQUIRE_FALSE(s.cached_file("", "index.m3u8").has_value());
@@ -111,7 +111,7 @@ TEST_CASE("Segmenter::cached_file rejects unsafe rendition ids", "[hls][segmente
 TEST_CASE("Segmenter::cached_file returns nullopt when file is absent", "[hls][segmenter]") {
     sonarium::hls::SegmenterConfig cfg;
     cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-test-cache-absent";
-    sonarium::hls::Segmenter s{cfg};
+    sonarium::hls::Segmenter const s{cfg};
     REQUIRE_FALSE(s.cached_file("track1", "seg00001.ts").has_value());
 }
 
@@ -222,7 +222,7 @@ TEST_CASE("evict_over_cap removes stale .part leftovers but spares fresh ones",
 TEST_CASE("is_safe_rendition_id rejects the reserved .part suffix", "[hls][segmenter]") {
     sonarium::hls::SegmenterConfig cfg;
     cfg.cache_root = std::filesystem::temp_directory_path() / "sonarium-part-suffix";
-    sonarium::hls::Segmenter s{cfg};
+    sonarium::hls::Segmenter const s{cfg};
     REQUIRE_FALSE(s.cached_file("track1.part", "index.m3u8").has_value());
 }
 

@@ -29,9 +29,9 @@ struct HlsRoutesConfig {
 //   - segmentation work is bounded; "busy" maps to 503 + Retry-After
 //   - storage paths must resolve inside `media_root` when it is set
 void register_hls_routes(::atria::Application& app,
-                         std::shared_ptr<sonarium::catalog::Repository const> catalog,
-                         std::shared_ptr<sonarium::core::MediaTokenSigner const> signer,
-                         std::shared_ptr<sonarium::hls::Segmenter> segmenter,
+                         const std::shared_ptr<sonarium::catalog::Repository const>& catalog,
+                         const std::shared_ptr<sonarium::core::MediaTokenSigner const>& signer,
+                         const std::shared_ptr<sonarium::hls::Segmenter>& segmenter,
                          HlsRoutesConfig config);
 
 } // namespace sonarium::server

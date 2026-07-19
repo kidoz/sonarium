@@ -46,7 +46,7 @@ TEST_CASE("checked_env_int reports malformed values and falls back", "[core][env
     std::vector<std::string> issues;
     REQUIRE(checked_env_int(test_var, 42, 1, 65535, issues) == 42);
     REQUIRE(issues.size() == 1);
-    REQUIRE(issues.front().find(test_var) != std::string::npos);
+    REQUIRE(issues.front().contains(test_var));
 
     ::setenv(test_var, "8200extra", 1); // trailing junk is not a valid integer
     REQUIRE(checked_env_int(test_var, 42, 1, 65535, issues) == 42);
@@ -59,7 +59,7 @@ TEST_CASE("checked_env_int reports out-of-range values and falls back", "[core][
     std::vector<std::string> issues;
     REQUIRE(checked_env_int(test_var, 8200, 1, 65535, issues) == 8200);
     REQUIRE(issues.size() == 1);
-    REQUIRE(issues.front().find("outside") != std::string::npos);
+    REQUIRE(issues.front().contains("outside"));
 }
 
 TEST_CASE("parse_log_level maps names case-insensitively", "[core][logging]") {

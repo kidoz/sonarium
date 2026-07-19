@@ -12,8 +12,8 @@ TEST_CASE("Empty DIDL-Lite has just the wrapper", "[dlna][didl_lite]") {
     auto const xml = build_didl_lite(std::vector<DidlContainer>{}, std::vector<DidlItem>{});
     REQUIRE(xml.starts_with("<DIDL-Lite "));
     REQUIRE(xml.ends_with("</DIDL-Lite>"));
-    REQUIRE(xml.find("<container") == std::string::npos);
-    REQUIRE(xml.find("<item") == std::string::npos);
+    REQUIRE(!xml.contains("<container"));
+    REQUIRE(!xml.contains("<item"));
 }
 
 TEST_CASE("Container emits required attributes", "[dlna][didl_lite]") {
@@ -25,13 +25,12 @@ TEST_CASE("Container emits required attributes", "[dlna][didl_lite]") {
     c.child_count = 12;
 
     auto const xml = build_didl_lite(std::vector<DidlContainer>{c});
-    REQUIRE(xml.find(R"(id="album:42")") != std::string::npos);
-    REQUIRE(xml.find(R"(parentID="artist:7")") != std::string::npos);
-    REQUIRE(xml.find(R"(restricted="1")") != std::string::npos);
-    REQUIRE(xml.find(R"(childCount="12")") != std::string::npos);
-    REQUIRE(xml.find("<dc:title>Greatest &lt;Hits&gt;</dc:title>") != std::string::npos);
-    REQUIRE(xml.find("<upnp:class>object.container.album.musicAlbum</upnp:class>")
-            != std::string::npos);
+    REQUIRE(xml.contains(R"(id="album:42")"));
+    REQUIRE(xml.contains(R"(parentID="artist:7")"));
+    REQUIRE(xml.contains(R"(restricted="1")"));
+    REQUIRE(xml.contains(R"(childCount="12")"));
+    REQUIRE(xml.contains("<dc:title>Greatest &lt;Hits&gt;</dc:title>"));
+    REQUIRE(xml.contains("<upnp:class>object.container.album.musicAlbum</upnp:class>"));
 }
 
 TEST_CASE("Item with one resource", "[dlna][didl_lite]") {
@@ -57,23 +56,20 @@ TEST_CASE("Item with one resource", "[dlna][didl_lite]") {
 
     auto const xml = build_didl_lite(std::vector<DidlItem>{i});
 
-    REQUIRE(xml.find(R"(<item id="track:99")") != std::string::npos);
-    REQUIRE(xml.find(R"(parentID="album:42")") != std::string::npos);
-    REQUIRE(xml.find("<dc:title>Side &amp; Step</dc:title>") != std::string::npos);
-    REQUIRE(xml.find("<dc:creator>AT&amp;T Allstars</dc:creator>") != std::string::npos);
-    REQUIRE(xml.find("<upnp:album>Greatest</upnp:album>") != std::string::npos);
-    REQUIRE(xml.find("<upnp:originalTrackNumber>3</upnp:originalTrackNumber>")
-            != std::string::npos);
-    REQUIRE(xml.find("<upnp:albumArtURI>http://192.168.1.10:8200/art/albums/42.jpg"
-                     "</upnp:albumArtURI>")
-            != std::string::npos);
-    REQUIRE(xml.find(R"(protocolInfo="http-get:*:audio/mpeg:DLNA.ORG_PN=MP3)")
-            != std::string::npos);
-    REQUIRE(xml.find(R"(duration="0:04:10.000")") != std::string::npos);
-    REQUIRE(xml.find(R"(bitrate="320000")") != std::string::npos);
-    REQUIRE(xml.find(R"(sampleFrequency="44100")") != std::string::npos);
-    REQUIRE(xml.find(R"(nrAudioChannels="2")") != std::string::npos);
-    REQUIRE(xml.find(R"(size="12345678")") != std::string::npos);
+    REQUIRE(xml.contains(R"(<item id="track:99")"));
+    REQUIRE(xml.contains(R"(parentID="album:42")"));
+    REQUIRE(xml.contains("<dc:title>Side &amp; Step</dc:title>"));
+    REQUIRE(xml.contains("<dc:creator>AT&amp;T Allstars</dc:creator>"));
+    REQUIRE(xml.contains("<upnp:album>Greatest</upnp:album>"));
+    REQUIRE(xml.contains("<upnp:originalTrackNumber>3</upnp:originalTrackNumber>"));
+    REQUIRE(xml.contains("<upnp:albumArtURI>http://192.168.1.10:8200/art/albums/42.jpg"
+                         "</upnp:albumArtURI>"));
+    REQUIRE(xml.contains(R"(protocolInfo="http-get:*:audio/mpeg:DLNA.ORG_PN=MP3)"));
+    REQUIRE(xml.contains(R"(duration="0:04:10.000")"));
+    REQUIRE(xml.contains(R"(bitrate="320000")"));
+    REQUIRE(xml.contains(R"(sampleFrequency="44100")"));
+    REQUIRE(xml.contains(R"(nrAudioChannels="2")"));
+    REQUIRE(xml.contains(R"(size="12345678")"));
 }
 
 TEST_CASE("Default upnp:class fallback for items and containers", "[dlna][didl_lite]") {
@@ -87,7 +83,6 @@ TEST_CASE("Default upnp:class fallback for items and containers", "[dlna][didl_l
     i.title = "U";
 
     auto const xml = build_didl_lite({c}, {i});
-    REQUIRE(xml.find("<upnp:class>object.container</upnp:class>") != std::string::npos);
-    REQUIRE(xml.find("<upnp:class>object.item.audioItem.musicTrack</upnp:class>")
-            != std::string::npos);
+    REQUIRE(xml.contains("<upnp:class>object.container</upnp:class>"));
+    REQUIRE(xml.contains("<upnp:class>object.item.audioItem.musicTrack</upnp:class>"));
 }

@@ -127,7 +127,7 @@ TEST_CASE("in-process renderer flow: describe, browse, fetch media", "[smoke]") 
     auto describe = make_request(::atria::Method::Get, "/description.xml");
     auto const description = app.dispatch(describe);
     REQUIRE(description.status() == ::atria::Status::Ok);
-    REQUIRE(description.body().find("MediaServer") != std::string::npos);
+    REQUIRE(description.body().contains("MediaServer"));
 
     // 2. Browse the root, then the album; the album listing must mint a
     //    fetchable media URL.
@@ -135,13 +135,13 @@ TEST_CASE("in-process renderer flow: describe, browse, fetch media", "[smoke]") 
         make_request(::atria::Method::Post, "/upnp/control/content-directory", browse_body("0"));
     auto const root = app.dispatch(browse_root);
     REQUIRE(root.status() == ::atria::Status::Ok);
-    REQUIRE(root.body().find("BrowseResponse") != std::string::npos);
+    REQUIRE(root.body().contains("BrowseResponse"));
 
     auto browse_album = make_request(
         ::atria::Method::Post, "/upnp/control/content-directory", browse_body("album:1"));
     auto const album_listing = app.dispatch(browse_album);
     REQUIRE(album_listing.status() == ::atria::Status::Ok);
-    REQUIRE(album_listing.body().find("/media/renditions/smoke-mp3") != std::string::npos);
+    REQUIRE(album_listing.body().contains("/media/renditions/smoke-mp3"));
 
     // 3. Fetch the media with a Range, renderer-style. File responses stream,
     //    so drain the chunk provider to see the actual bytes.

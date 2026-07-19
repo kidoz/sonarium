@@ -95,8 +95,9 @@ private:
 }
 
 [[nodiscard]] std::unique_ptr<::atria::Application>
-build_app_with_signer(std::shared_ptr<Repository> repo, std::shared_ptr<MediaTokenSigner> signer) {
-    auto cfg = sample_config_with_signer(signer);
+build_app_with_signer(const std::shared_ptr<Repository>& repo,
+                      std::shared_ptr<MediaTokenSigner> signer) {
+    auto cfg = sample_config_with_signer(std::move(signer));
     auto profiles = std::make_shared<sonarium::dlna::DeviceProfileRegistry>(
         sonarium::dlna::DeviceProfileRegistry::with_defaults());
     auto server =
@@ -260,6 +261,6 @@ TEST_CASE("DIDL-Lite minted URLs include the token suffix", "[composition][http]
     INFO("response body: " << res.body());
     // The DIDL is double-escaped inside <Result>: `?` -> `?`, `&` -> `&amp;amp;`
     // (ampersand once for the DIDL-XML, then once for the SOAP envelope wrapping it).
-    REQUIRE(res.body().find("/media/renditions/demo?expires=1700000060") != std::string::npos);
-    REQUIRE(res.body().find("sig=") != std::string::npos);
+    REQUIRE(res.body().contains("/media/renditions/demo?expires=1700000060"));
+    REQUIRE(res.body().contains("sig="));
 }

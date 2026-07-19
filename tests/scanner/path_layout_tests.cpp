@@ -12,8 +12,8 @@ TEST_CASE("slug lowercases and collapses non-alphanumerics", "[scanner][slug]") 
     REQUIRE(slug("Aerosmith - Toys") == "aerosmith-toys");
     REQUIRE(slug("  leading and trailing  ") == "leading-and-trailing");
     REQUIRE(slug("UPPER") == "upper");
-    REQUIRE(slug("") == "");
-    REQUIRE(slug("---") == "");
+    REQUIRE(slug("").empty());
+    REQUIRE(slug("---").empty());
     REQUIRE(slug("a---b") == "a-b");
     REQUIRE(slug("123 abc") == "123-abc");
 }

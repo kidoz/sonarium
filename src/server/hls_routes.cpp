@@ -39,7 +39,7 @@ namespace {
 }
 
 [[nodiscard]] std::optional<std::string> read_file(std::filesystem::path const& path) {
-    std::ifstream in{path, std::ios::binary};
+    std::ifstream const in{path, std::ios::binary};
     if (!in) {
         return std::nullopt;
     }
@@ -93,9 +93,9 @@ namespace {
 } // namespace
 
 void register_hls_routes(::atria::Application& app,
-                         std::shared_ptr<sonarium::catalog::Repository const> catalog,
-                         std::shared_ptr<sonarium::core::MediaTokenSigner const> signer,
-                         std::shared_ptr<sonarium::hls::Segmenter> segmenter,
+                         const std::shared_ptr<sonarium::catalog::Repository const>& catalog,
+                         const std::shared_ptr<sonarium::core::MediaTokenSigner const>& signer,
+                         const std::shared_ptr<sonarium::hls::Segmenter>& segmenter,
                          HlsRoutesConfig config) {
     auto const media_base_url = std::move(config.media_base_url);
     auto const self_base_url = std::move(config.self_base_url);

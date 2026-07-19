@@ -20,7 +20,7 @@ namespace sonarium::composition {
 // All handlers capture `server` and `catalog` by shared ownership; the routes
 // remain valid as long as the application object exists.
 void register_dlna_routes(::atria::Application& app,
-                          std::shared_ptr<DlnaServer const> server,
-                          std::shared_ptr<sonarium::catalog::Repository const> catalog);
+                          const std::shared_ptr<DlnaServer const>& server,
+                          const std::shared_ptr<sonarium::catalog::Repository const>& catalog);
 
 } // namespace sonarium::composition

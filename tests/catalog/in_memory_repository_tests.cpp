@@ -141,8 +141,8 @@ TEST_CASE("get_* return nullopt for unknown ids", "[catalog][repo]") {
 TEST_CASE("system_update_id starts at zero and bumps", "[catalog][repo]") {
     InMemoryRepository repo;
     REQUIRE(repo.system_update_id() == 0);
-    repo.bump_system_update_id();
-    repo.bump_system_update_id();
+    REQUIRE(repo.bump_system_update_id().has_value());
+    REQUIRE(repo.bump_system_update_id().has_value());
     REQUIRE(repo.system_update_id() == 2);
 }
 

@@ -95,8 +95,8 @@ TEST_CASE("Browse(0, BrowseDirectChildren) returns Music + Playlists", "[dlna][b
     REQUIRE(r.has_value());
     REQUIRE(r->total_matches == 2);
     REQUIRE(r->number_returned == 2);
-    REQUIRE(r->didl_lite.find(R"(<container id="1" parentID="0")") != std::string::npos);
-    REQUIRE(r->didl_lite.find(R"(<container id="playlists")") != std::string::npos);
+    REQUIRE(r->didl_lite.contains(R"(<container id="1" parentID="0")"));
+    REQUIRE(r->didl_lite.contains(R"(<container id="playlists")"));
 }
 
 TEST_CASE("Browse(0, BrowseMetadata) returns the root container", "[dlna][browse]") {
@@ -108,7 +108,7 @@ TEST_CASE("Browse(0, BrowseMetadata) returns the root container", "[dlna][browse
     auto const r = handle_browse(browse_request("0", "BrowseMetadata"), ctx);
     REQUIRE(r.has_value());
     REQUIRE(r->number_returned == 1);
-    REQUIRE(r->didl_lite.find(R"(<container id="0" parentID="-1")") != std::string::npos);
+    REQUIRE(r->didl_lite.contains(R"(<container id="0" parentID="-1")"));
 }
 
 TEST_CASE("Browse(artists) lists artist containers", "[dlna][browse]") {
@@ -121,9 +121,8 @@ TEST_CASE("Browse(artists) lists artist containers", "[dlna][browse]") {
     REQUIRE(r.has_value());
     REQUIRE(r->total_matches == 1);
     REQUIRE(r->number_returned == 1);
-    REQUIRE(r->didl_lite.find(R"(<container id="artist:1" parentID="artists")")
-            != std::string::npos);
-    REQUIRE(r->didl_lite.find("<dc:title>Stones</dc:title>") != std::string::npos);
+    REQUIRE(r->didl_lite.contains(R"(<container id="artist:1" parentID="artists")"));
+    REQUIRE(r->didl_lite.contains("<dc:title>Stones</dc:title>"));
 }
 
 TEST_CASE("Browse(album:1) lists track items with resources", "[dlna][browse]") {
@@ -136,11 +135,11 @@ TEST_CASE("Browse(album:1) lists track items with resources", "[dlna][browse]") 
     REQUIRE(r.has_value());
     REQUIRE(r->total_matches == 2);
     REQUIRE(r->number_returned == 2);
-    REQUIRE(r->didl_lite.find(R"(<item id="track:1" parentID="album:1")") != std::string::npos);
-    REQUIRE(r->didl_lite.find(R"(<item id="track:2" parentID="album:1")") != std::string::npos);
-    REQUIRE(r->didl_lite.find("<dc:title>Gimme Shelter</dc:title>") != std::string::npos);
-    REQUIRE(r->didl_lite.find(R"(<res protocolInfo="http-get:*:audio/mpeg)") != std::string::npos);
-    REQUIRE(r->didl_lite.find("http://h:8200/media/renditions/r1") != std::string::npos);
+    REQUIRE(r->didl_lite.contains(R"(<item id="track:1" parentID="album:1")"));
+    REQUIRE(r->didl_lite.contains(R"(<item id="track:2" parentID="album:1")"));
+    REQUIRE(r->didl_lite.contains("<dc:title>Gimme Shelter</dc:title>"));
+    REQUIRE(r->didl_lite.contains(R"(<res protocolInfo="http-get:*:audio/mpeg)"));
+    REQUIRE(r->didl_lite.contains("http://h:8200/media/renditions/r1"));
 }
 
 TEST_CASE("Browse(album:1) honors pagination", "[dlna][browse]") {
@@ -153,8 +152,8 @@ TEST_CASE("Browse(album:1) honors pagination", "[dlna][browse]") {
     REQUIRE(r.has_value());
     REQUIRE(r->total_matches == 2);
     REQUIRE(r->number_returned == 1);
-    REQUIRE(r->didl_lite.find(R"(<item id="track:2")") != std::string::npos);
-    REQUIRE(r->didl_lite.find(R"(<item id="track:1")") == std::string::npos);
+    REQUIRE(r->didl_lite.contains(R"(<item id="track:2")"));
+    REQUIRE(!r->didl_lite.contains(R"(<item id="track:1")"));
 }
 
 TEST_CASE("Browse for unknown artist returns no_such_object", "[dlna][browse]") {
@@ -214,7 +213,7 @@ TEST_CASE("Track items carry duration on each <res>", "[dlna][browse]") {
 
     auto const r = handle_browse(browse_request("track:1", "BrowseMetadata"), ctx);
     REQUIRE(r.has_value());
-    REQUIRE(r->didl_lite.find(R"(duration="0:04:30.000")") != std::string::npos);
+    REQUIRE(r->didl_lite.contains(R"(duration="0:04:30.000")"));
 }
 
 TEST_CASE("Track items carry upnp:albumArtURI when album has cover art",
@@ -230,9 +229,8 @@ TEST_CASE("Track items carry upnp:albumArtURI when album has cover art",
 
     auto const r = handle_browse(browse_request("album:1"), ctx);
     REQUIRE(r.has_value());
-    REQUIRE(r->didl_lite.find(
-                "<upnp:albumArtURI>http://lan.invalid:8200/art/albums/1</upnp:albumArtURI>")
-            != std::string::npos);
+    REQUIRE(r->didl_lite.contains(
+        "<upnp:albumArtURI>http://lan.invalid:8200/art/albums/1</upnp:albumArtURI>"));
 }
 
 TEST_CASE("Track items omit upnp:albumArtURI when album has no cover art",
@@ -244,5 +242,5 @@ TEST_CASE("Track items omit upnp:albumArtURI when album has no cover art",
 
     auto const r = handle_browse(browse_request("album:1"), ctx);
     REQUIRE(r.has_value());
-    REQUIRE(r->didl_lite.find("<upnp:albumArtURI>") == std::string::npos);
+    REQUIRE(!r->didl_lite.contains("<upnp:albumArtURI>"));
 }

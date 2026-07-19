@@ -22,50 +22,46 @@ DeviceInfo sample_info() {
 
 TEST_CASE("Device description includes MediaServer:1 type", "[upnp][device_description]") {
     auto const xml = build_device_description(sample_info());
-    REQUIRE(xml.find("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>")
-            != std::string::npos);
+    REQUIRE(xml.contains("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>"));
 }
 
 TEST_CASE("Device description carries friendlyName, model and UDN", "[upnp][device_description]") {
     auto const xml = build_device_description(sample_info());
-    REQUIRE(xml.find("<friendlyName>Sonarium</friendlyName>") != std::string::npos);
-    REQUIRE(xml.find("<manufacturer>Kidoz</manufacturer>") != std::string::npos);
-    REQUIRE(xml.find("<modelName>sonarium-dlna</modelName>") != std::string::npos);
-    REQUIRE(xml.find("<modelNumber>0.1</modelNumber>") != std::string::npos);
-    REQUIRE(xml.find("<UDN>uuid:abcdef01-2345-6789-abcd-ef0123456789</UDN>") != std::string::npos);
+    REQUIRE(xml.contains("<friendlyName>Sonarium</friendlyName>"));
+    REQUIRE(xml.contains("<manufacturer>Kidoz</manufacturer>"));
+    REQUIRE(xml.contains("<modelName>sonarium-dlna</modelName>"));
+    REQUIRE(xml.contains("<modelNumber>0.1</modelNumber>"));
+    REQUIRE(xml.contains("<UDN>uuid:abcdef01-2345-6789-abcd-ef0123456789</UDN>"));
 }
 
 TEST_CASE("Optional empty fields are omitted, not emitted empty", "[upnp][device_description]") {
     auto const xml = build_device_description(sample_info());
-    REQUIRE(xml.find("<modelDescription>") == std::string::npos);
-    REQUIRE(xml.find("<manufacturerURL>") == std::string::npos);
-    REQUIRE(xml.find("<serialNumber>") == std::string::npos);
+    REQUIRE(!xml.contains("<modelDescription>"));
+    REQUIRE(!xml.contains("<manufacturerURL>"));
+    REQUIRE(!xml.contains("<serialNumber>"));
 }
 
 TEST_CASE("Device description references both services", "[upnp][device_description]") {
     auto const xml = build_device_description(sample_info());
-    REQUIRE(xml.find("urn:schemas-upnp-org:service:ContentDirectory:1") != std::string::npos);
-    REQUIRE(xml.find("urn:schemas-upnp-org:service:ConnectionManager:1") != std::string::npos);
-    REQUIRE(xml.find("<SCPDURL>/ContentDirectory/scpd.xml</SCPDURL>") != std::string::npos);
-    REQUIRE(xml.find("<controlURL>/upnp/control/content-directory</controlURL>")
-            != std::string::npos);
-    REQUIRE(xml.find("<eventSubURL>/upnp/event/content-directory</eventSubURL>")
-            != std::string::npos);
-    REQUIRE(xml.find("<SCPDURL>/ConnectionManager/scpd.xml</SCPDURL>") != std::string::npos);
-    REQUIRE(xml.find("<controlURL>/upnp/control/connection-manager</controlURL>")
-            != std::string::npos);
+    REQUIRE(xml.contains("urn:schemas-upnp-org:service:ContentDirectory:1"));
+    REQUIRE(xml.contains("urn:schemas-upnp-org:service:ConnectionManager:1"));
+    REQUIRE(xml.contains("<SCPDURL>/ContentDirectory/scpd.xml</SCPDURL>"));
+    REQUIRE(xml.contains("<controlURL>/upnp/control/content-directory</controlURL>"));
+    REQUIRE(xml.contains("<eventSubURL>/upnp/event/content-directory</eventSubURL>"));
+    REQUIRE(xml.contains("<SCPDURL>/ConnectionManager/scpd.xml</SCPDURL>"));
+    REQUIRE(xml.contains("<controlURL>/upnp/control/connection-manager</controlURL>"));
 }
 
 TEST_CASE("Custom service paths are honored", "[upnp][device_description]") {
     DeviceServicePaths paths;
     paths.content_directory_ctrl = "/api/cd/ctrl";
     auto const xml = build_device_description(sample_info(), paths);
-    REQUIRE(xml.find("<controlURL>/api/cd/ctrl</controlURL>") != std::string::npos);
+    REQUIRE(xml.contains("<controlURL>/api/cd/ctrl</controlURL>"));
 }
 
 TEST_CASE("Special characters in friendlyName are XML-escaped", "[upnp][device_description]") {
     DeviceInfo info = sample_info();
     info.friendly_name = "AT&T <Lab>";
     auto const xml = build_device_description(info);
-    REQUIRE(xml.find("<friendlyName>AT&amp;T &lt;Lab&gt;</friendlyName>") != std::string::npos);
+    REQUIRE(xml.contains("<friendlyName>AT&amp;T &lt;Lab&gt;</friendlyName>"));
 }

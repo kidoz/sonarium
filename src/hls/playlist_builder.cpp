@@ -85,7 +85,7 @@ std::string build_media_playlist(MediaVariant const& variant) {
 std::string build_master_playlist(std::span<MediaVariant const> variants,
                                   std::string_view base_url) {
     std::string out;
-    out.reserve(256 + variants.size() * 128);
+    out.reserve(256 + (variants.size() * 128));
     out.append("#EXTM3U\n");
     out.append("#EXT-X-VERSION:3\n");
     for (auto const& v : variants) {

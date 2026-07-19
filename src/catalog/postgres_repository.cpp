@@ -228,7 +228,7 @@ std::expected<void, std::string> PostgresRepository::ensure_schema() {
 
 std::expected<std::shared_ptr<PostgresRepository>, std::string>
 PostgresRepository::open(std::string const& conninfo) {
-    ::asterorm::pg::driver driver;
+    ::asterorm::pg::driver const driver;
     auto conn = driver.connect(conninfo);
     if (!conn.has_value()) {
         return std::unexpected(std::string{"connect failed: "} + conn.error().message);

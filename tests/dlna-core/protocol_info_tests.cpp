@@ -37,7 +37,7 @@ TEST_CASE("WAV/LPCM gets LPCM PN", "[dlna][protocol_info]") {
 }
 
 TEST_CASE("join_protocol_info_csv joins with commas, no trailing", "[dlna][protocol_info]") {
-    REQUIRE(join_protocol_info_csv({}) == "");
+    REQUIRE(join_protocol_info_csv({}).empty());
     REQUIRE(join_protocol_info_csv({"a"}) == "a");
     REQUIRE(join_protocol_info_csv({"a", "b", "c"}) == "a,b,c");
 }

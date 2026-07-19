@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <string>
@@ -25,22 +26,15 @@ namespace {
 
 [[nodiscard]] bool any_payload_contains(std::vector<OutboundMessage> const& msgs,
                                         std::string_view needle) {
-    for (auto const& m : msgs) {
-        if (m.payload.find(needle) != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(
+        msgs, [needle](OutboundMessage const& m) { return m.payload.contains(needle); });
 }
 
 [[nodiscard]] bool
 all_target(std::vector<OutboundMessage> const& msgs, std::string_view address, std::uint16_t port) {
-    for (auto const& m : msgs) {
-        if (m.target_address != address || m.target_port != port) {
-            return false;
-        }
-    }
-    return true;
+    return std::ranges::all_of(msgs, [address, port](OutboundMessage const& m) {
+        return m.target_address == address && m.target_port == port;
+    });
 }
 
 } // namespace
@@ -55,12 +49,10 @@ TEST_CASE("alive_announcements emits 5 packets to the multicast group", "[compos
     // Every alive packet starts with NOTIFY and carries NTS: ssdp:alive
     for (auto const& m : msgs) {
         REQUIRE(m.payload.starts_with("NOTIFY * HTTP/1.1\r\n"));
-        REQUIRE(m.payload.find("NTS: ssdp:alive\r\n") != std::string::npos);
-        REQUIRE(m.payload.find("CACHE-CONTROL: max-age=1800\r\n") != std::string::npos);
-        REQUIRE(m.payload.find("LOCATION: http://192.168.1.10:8200/description.xml\r\n")
-                != std::string::npos);
-        REQUIRE(m.payload.find("SERVER: Sonarium/0.1 UPnP/1.0 sonarium-dlna/0.1\r\n")
-                != std::string::npos);
+        REQUIRE(m.payload.contains("NTS: ssdp:alive\r\n"));
+        REQUIRE(m.payload.contains("CACHE-CONTROL: max-age=1800\r\n"));
+        REQUIRE(m.payload.contains("LOCATION: http://192.168.1.10:8200/description.xml\r\n"));
+        REQUIRE(m.payload.contains("SERVER: Sonarium/0.1 UPnP/1.0 sonarium-dlna/0.1\r\n"));
     }
 
     // Coverage: every required NT must show up exactly once.
@@ -76,10 +68,8 @@ TEST_CASE("alive USN for uuid: target is the bare UDN", "[composition][ssdp]") {
     auto const msgs = alive_announcements(cfg);
     bool found_bare = false;
     for (auto const& m : msgs) {
-        if (m.payload.find("NT: uuid:abcdef01-2345-6789-abcd-ef0123456789\r\n")
-            != std::string::npos) {
-            REQUIRE(m.payload.find("USN: uuid:abcdef01-2345-6789-abcd-ef0123456789\r\n")
-                    != std::string::npos);
+        if (m.payload.contains("NT: uuid:abcdef01-2345-6789-abcd-ef0123456789\r\n")) {
+            REQUIRE(m.payload.contains("USN: uuid:abcdef01-2345-6789-abcd-ef0123456789\r\n"));
             found_bare = true;
         }
     }
@@ -94,9 +84,9 @@ TEST_CASE("byebye_announcements emit ssdp:byebye with no LOCATION/cache", "[comp
     REQUIRE(all_target(msgs, "239.255.255.250", 1900));
 
     for (auto const& m : msgs) {
-        REQUIRE(m.payload.find("NTS: ssdp:byebye\r\n") != std::string::npos);
-        REQUIRE(m.payload.find("LOCATION") == std::string::npos);
-        REQUIRE(m.payload.find("CACHE-CONTROL") == std::string::npos);
+        REQUIRE(m.payload.contains("NTS: ssdp:byebye\r\n"));
+        REQUIRE(!m.payload.contains("LOCATION"));
+        REQUIRE(!m.payload.contains("CACHE-CONTROL"));
     }
 }
 
@@ -113,12 +103,11 @@ TEST_CASE("responses_for_msearch ssdp:all yields five unicast responses", "[comp
 
     for (auto const& r : msgs) {
         REQUIRE(r.payload.starts_with("HTTP/1.1 200 OK\r\n"));
-        REQUIRE(r.payload.find("CACHE-CONTROL: max-age=1800\r\n") != std::string::npos);
-        REQUIRE(r.payload.find("LOCATION: http://192.168.1.10:8200/description.xml\r\n")
-                != std::string::npos);
-        REQUIRE(r.payload.find("EXT: \r\n") != std::string::npos);
-        REQUIRE(r.payload.find("ST:") != std::string::npos);
-        REQUIRE(r.payload.find("USN: uuid:") != std::string::npos);
+        REQUIRE(r.payload.contains("CACHE-CONTROL: max-age=1800\r\n"));
+        REQUIRE(r.payload.contains("LOCATION: http://192.168.1.10:8200/description.xml\r\n"));
+        REQUIRE(r.payload.contains("EXT: \r\n"));
+        REQUIRE(r.payload.contains("ST:"));
+        REQUIRE(r.payload.contains("USN: uuid:"));
     }
 }
 
@@ -132,11 +121,9 @@ TEST_CASE("responses_for_msearch specific ST yields one packet", "[composition][
     REQUIRE(msgs.size() == 1);
     REQUIRE(msgs[0].target_address == "10.0.0.5");
     REQUIRE(msgs[0].target_port == 49152);
-    REQUIRE(msgs[0].payload.find("ST: urn:schemas-upnp-org:device:MediaServer:1\r\n")
-            != std::string::npos);
-    REQUIRE(msgs[0].payload.find("USN: uuid:abcdef01-2345-6789-abcd-ef0123456789::"
-                                 "urn:schemas-upnp-org:device:MediaServer:1\r\n")
-            != std::string::npos);
+    REQUIRE(msgs[0].payload.contains("ST: urn:schemas-upnp-org:device:MediaServer:1\r\n"));
+    REQUIRE(msgs[0].payload.contains("USN: uuid:abcdef01-2345-6789-abcd-ef0123456789::"
+                                     "urn:schemas-upnp-org:device:MediaServer:1\r\n"));
 }
 
 TEST_CASE("responses_for_msearch unrecognised ST produces no responses", "[composition][ssdp]") {
@@ -151,13 +138,13 @@ TEST_CASE("responses_for_msearch unrecognised ST produces no responses", "[compo
 TEST_CASE("LOCATION never resolves to 0.0.0.0 from helpers", "[composition][ssdp]") {
     auto const cfg = sample_ssdp_config();
     for (auto const& m : alive_announcements(cfg)) {
-        REQUIRE(m.payload.find("LOCATION: http://0.0.0.0") == std::string::npos);
+        REQUIRE(!m.payload.contains("LOCATION: http://0.0.0.0"));
     }
     MSearch ms;
     ms.st = "ssdp:all";
     ms.man = "ssdp:discover";
     for (auto const& m : responses_for_msearch(cfg, ms, "1.2.3.4", 1)) {
-        REQUIRE(m.payload.find("LOCATION: http://0.0.0.0") == std::string::npos);
+        REQUIRE(!m.payload.contains("LOCATION: http://0.0.0.0"));
     }
 }
 

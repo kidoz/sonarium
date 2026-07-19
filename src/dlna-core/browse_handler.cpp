@@ -211,7 +211,7 @@ void apply_pagination(BrowseResult& result, std::uint32_t total_matches) {
             if (!t.has_value()) {
                 break;
             }
-            std::string parent =
+            std::string const parent =
                 t->album_id.empty() ? make_tracks_id() : make_album_id(t->album_id);
             items.push_back(build_track_item(*t, parent, ctx));
             break;
@@ -347,7 +347,8 @@ void apply_pagination(BrowseResult& result, std::uint32_t total_matches) {
     std::vector<DidlItem> items;
     items.reserve(page.rows.size());
     for (auto const& t : page.rows) {
-        std::string parent = t.album_id.empty() ? make_tracks_id() : make_album_id(t.album_id);
+        std::string const parent =
+            t.album_id.empty() ? make_tracks_id() : make_album_id(t.album_id);
         items.push_back(build_track_item(t, parent, ctx));
     }
     result.didl_lite = build_didl_lite({}, items);
@@ -387,9 +388,8 @@ void apply_pagination(BrowseResult& result, std::uint32_t total_matches) {
     }
 
     auto ordered = pl->items;
-    std::stable_sort(ordered.begin(), ordered.end(), [](auto const& a, auto const& b) {
-        return a.position < b.position;
-    });
+    std::ranges::stable_sort(ordered,
+                             [](auto const& a, auto const& b) { return a.position < b.position; });
 
     auto const total = static_cast<std::uint32_t>(ordered.size());
     auto const start = std::min(req.starting_index, total);
@@ -481,7 +481,7 @@ handle_browse(sonarium::upnp::ParsedSoapRequest const& req, BrowseContext const&
     auto const flag = req.arg_or("BrowseFlag", "BrowseDirectChildren");
     auto const starting_index = parse_u32(req.arg_or("StartingIndex", "0"), 0);
     auto const requested = parse_u32(req.arg_or("RequestedCount", "0"), 0);
-    sonarium::catalog::PageRequest page_req{starting_index, requested};
+    sonarium::catalog::PageRequest const page_req{starting_index, requested};
 
     if (flag == "BrowseMetadata") {
         return browse_metadata(*parsed, ctx);

@@ -72,7 +72,7 @@ public:
 
     void notify_changed() {
         {
-            std::scoped_lock lock{change_mutex_};
+            std::scoped_lock const lock{change_mutex_};
             changed_ = true;
         }
         change_cv_.notify_all();
@@ -133,7 +133,7 @@ make_native_fs_watcher(std::filesystem::path const& root) {
 
     dispatch_queue_t queue = dispatch_queue_create("sonarium.fsevents", DISPATCH_QUEUE_SERIAL);
     FSEventStreamSetDispatchQueue(stream, queue);
-    if (!FSEventStreamStart(stream)) {
+    if (FSEventStreamStart(stream) == 0u) {
         FSEventStreamSetDispatchQueue(stream, nullptr);
         FSEventStreamInvalidate(stream);
         FSEventStreamRelease(stream);

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <logspine/field.hpp>
@@ -119,12 +120,9 @@ private:
 
 [[nodiscard]] bool
 entry_has(CapturingLogger::Entry const& e, std::string_view key, std::string_view value) {
-    for (auto const& f : e.fields) {
-        if (f.key() == key && field_value(f) == value) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(e.fields, [key, value](auto const& f) {
+        return f.key() == key && field_value(f) == value;
+    });
 }
 
 [[nodiscard]] CapturingLogger::Entry const*

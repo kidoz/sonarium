@@ -31,6 +31,8 @@ Checks: >
   -cppcoreguidelines-avoid-non-const-global-variables,
   -cppcoreguidelines-non-private-member-variables-in-classes,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-pro-type-reinterpret-cast,
@@ -38,7 +40,9 @@ Checks: >
   -hicpp-no-array-decay,
   -hicpp-vararg,
   -hicpp-signed-bitwise,
+  -hicpp-named-parameter,
   -misc-include-cleaner,
+  -modernize-use-designated-initializers,
   -misc-non-private-member-variables-in-classes,
   -misc-use-anonymous-namespace,
   -portability-avoid-pragma-once,
@@ -54,7 +58,27 @@ Checks: >
 # their existing findings are burned down. EnumCastOutOfRange is excluded
 # above: it fires on Catch2 internals and on the deliberate HTTP-503 cast
 # (atria's Status enum lacks the value).
-WarningsAsErrors: 'clang-analyzer-*,bugprone-use-after-move,bugprone-dangling-handle'
+WarningsAsErrors: >
+  clang-analyzer-*,
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  cert-err33-c,
+  misc-const-correctness,
+  misc-unused-using-decls,
+  modernize-use-ranges,
+  modernize-use-starts-ends-with,
+  modernize-raw-string-literal,
+  modernize-return-braced-init-list,
+  performance-unnecessary-value-param,
+  readability-container-contains,
+  readability-container-size-empty,
+  readability-else-after-return,
+  readability-implicit-bool-conversion,
+  readability-math-missing-parentheses,
+  readability-qualified-auto,
+  readability-redundant-string-init,
+  readability-use-anyofallof,
+  readability-use-std-min-max
 HeaderFilterRegex: '^(src|tests|examples)/.*\.(h|hpp)$'
 FormatStyle: file
 

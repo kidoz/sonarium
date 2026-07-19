@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <charconv>
 #include <cstring>
+#include <ranges>
 #include <string>
 
 namespace sonarium::cli {
@@ -148,8 +149,8 @@ connect_tcp(std::string const& host, std::uint16_t port, std::chrono::millisecon
 
 [[nodiscard]] std::string trim(std::string_view s) {
     auto const not_space = [](char c) { return c != ' ' && c != '\t'; };
-    auto const begin = std::find_if(s.begin(), s.end(), not_space);
-    auto const end = std::find_if(s.rbegin(), s.rend(), not_space).base();
+    const auto* const begin = std::ranges::find_if(s, not_space);
+    const auto* const end = std::ranges::find_if(std::views::reverse(s), not_space).base();
     if (begin >= end) {
         return {};
     }

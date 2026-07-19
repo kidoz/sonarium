@@ -32,7 +32,7 @@ struct ParsedSoapRequest {
 
     [[nodiscard]] std::string arg_or(std::string_view name, std::string_view fallback) const {
         auto const* p = arg(name);
-        return p ? *p : std::string(fallback);
+        return (p != nullptr) ? *p : std::string(fallback);
     }
 };
 

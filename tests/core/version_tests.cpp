@@ -21,8 +21,8 @@ TEST_CASE("product_name is the canonical identifier", "[core][version]") {
 TEST_CASE("server signature is SSDP-friendly", "[core][version]") {
     auto const sig = server_signature();
     REQUIRE(sig.starts_with("Sonarium/"));
-    REQUIRE(sig.find("UPnP/1.0") != std::string_view::npos);
-    REQUIRE(sig.find("dlna/") != std::string_view::npos);
+    REQUIRE(sig.contains("UPnP/1.0"));
+    REQUIRE(sig.contains("dlna/"));
 }
 
 TEST_CASE("Version equality is value-based", "[core][version]") {

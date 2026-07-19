@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <ranges>
 #include <string>
 
 namespace sonarium::cli {
@@ -55,8 +56,8 @@ find_open_tag(std::string_view body, std::string_view tag, std::size_t from = 0)
 
 [[nodiscard]] std::string trim(std::string_view s) {
     auto const not_space = [](char c) { return c != ' ' && c != '\t' && c != '\r' && c != '\n'; };
-    auto const begin = std::find_if(s.begin(), s.end(), not_space);
-    auto const end = std::find_if(s.rbegin(), s.rend(), not_space).base();
+    const auto* const begin = std::ranges::find_if(s, not_space);
+    const auto* const end = std::ranges::find_if(std::views::reverse(s), not_space).base();
     if (begin >= end) {
         return {};
     }
@@ -207,16 +208,16 @@ std::expected<BrowseSummary, std::string> parse_browse_response(std::string_view
     }
 
     BrowseSummary s;
-    if (auto v = parse_u32(total_str, "TotalMatches"); !v.has_value()) {
-        return std::unexpected(v.error());
-    } else {
-        s.total_matches = *v;
+    auto const total = parse_u32(total_str, "TotalMatches");
+    if (!total.has_value()) {
+        return std::unexpected(total.error());
     }
-    if (auto v = parse_u32(returned_str, "NumberReturned"); !v.has_value()) {
-        return std::unexpected(v.error());
-    } else {
-        s.number_returned = *v;
+    s.total_matches = *total;
+    auto const returned = parse_u32(returned_str, "NumberReturned");
+    if (!returned.has_value()) {
+        return std::unexpected(returned.error());
     }
+    s.number_returned = *returned;
     if (!update_str.empty()) {
         if (auto v = parse_u32(update_str, "UpdateID"); v.has_value()) {
             s.update_id = *v;

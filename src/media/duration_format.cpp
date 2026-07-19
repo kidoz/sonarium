@@ -1,5 +1,6 @@
 #include "media/duration_format.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -15,9 +16,7 @@ constexpr std::int64_t ms_per_hour = 60 * ms_per_minute;
 } // namespace
 
 std::string format_didl_duration_ms(std::int64_t total_ms) noexcept {
-    if (total_ms < 0) {
-        total_ms = 0;
-    }
+    total_ms = std::max<std::int64_t>(total_ms, 0);
 
     auto const hours = total_ms / ms_per_hour;
     auto const minutes = (total_ms % ms_per_hour) / ms_per_minute;
@@ -37,7 +36,7 @@ std::string format_didl_duration_ms(std::int64_t total_ms) noexcept {
     if (written <= 0) {
         return "0:00:00.000";
     }
-    return std::string(buf.data(), static_cast<std::size_t>(written));
+    return {buf.data(), static_cast<std::size_t>(written)};
 }
 
 std::string format_didl_duration(std::chrono::milliseconds total) noexcept {

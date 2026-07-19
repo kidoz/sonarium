@@ -13,7 +13,7 @@ TEST_CASE("xml_escape escapes the five canonical entities", "[dlna][xml]") {
 }
 
 TEST_CASE("xml_escape leaves benign text alone", "[dlna][xml]") {
-    REQUIRE(xml_escape("") == "");
+    REQUIRE(xml_escape("").empty());
     REQUIRE(xml_escape("Hello, world!") == "Hello, world!");
     REQUIRE(xml_escape("track-42") == "track-42");
 }

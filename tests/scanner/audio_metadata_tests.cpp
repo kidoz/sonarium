@@ -51,7 +51,7 @@ duration=10.000000
 [/FORMAT]
 )";
 
-constexpr std::string_view empty_input = "";
+constexpr std::string_view empty_input;
 
 } // namespace
 

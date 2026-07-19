@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <atria/application.hpp>
 #include <atria/middleware.hpp>
@@ -164,12 +165,9 @@ build_service_config(std::string_view advertised_host,
 }
 
 [[nodiscard]] bool has_flag(std::span<char* const> args, std::string_view flag) noexcept {
-    for (auto const* a : args.subspan(1)) {
-        if (std::strcmp(a, std::string{flag}.c_str()) == 0) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(args.subspan(1), [flag](char const* a) {
+        return std::strcmp(a, std::string{flag}.c_str()) == 0;
+    });
 }
 
 // SIGINT/SIGTERM → Application::shutdown(), which only stores an atomic flag
@@ -208,7 +206,7 @@ void run_offline_preview(sonarium::composition::DlnaServer& server) {
 int main(int argc, char** argv) {
     // Make stdout line-buffered so log lines appear immediately even when piped
     // (the default block-buffering hides events until the process exits cleanly).
-    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+    (void)std::setvbuf(stdout, nullptr, _IOLBF, 0);
 
     auto args = std::span<char* const>{argv, static_cast<std::size_t>(argc)};
     auto const v = sonarium::core::current_version();
@@ -310,8 +308,8 @@ int main(int argc, char** argv) {
 
     ::atria::Application app;
     g_shutdown_app.store(&app);
-    std::signal(SIGINT, handle_shutdown_signal);
-    std::signal(SIGTERM, handle_shutdown_signal);
+    (void)std::signal(SIGINT, handle_shutdown_signal);
+    (void)std::signal(SIGTERM, handle_shutdown_signal);
     app.use(::atria::middleware::error_handler());
     app.use(::atria::middleware::request_logger());
     sonarium::composition::register_dlna_routes(

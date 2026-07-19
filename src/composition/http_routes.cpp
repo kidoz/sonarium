@@ -69,8 +69,8 @@ namespace {
 } // namespace
 
 void register_dlna_routes(::atria::Application& app,
-                          std::shared_ptr<DlnaServer const> server,
-                          std::shared_ptr<sonarium::catalog::Repository const> catalog) {
+                          const std::shared_ptr<DlnaServer const>& server,
+                          const std::shared_ptr<sonarium::catalog::Repository const>& catalog) {
     // GET /version — identity probe, mirrors the HLS server's endpoint.
     app.get("/version", [](::atria::Request&) {
         auto const v = sonarium::core::current_version();

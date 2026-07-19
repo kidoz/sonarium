@@ -7,40 +7,39 @@ using sonarium::upnp::content_directory_scpd_xml;
 
 TEST_CASE("ContentDirectory SCPD declares the four required actions", "[upnp][scpd]") {
     auto const xml = content_directory_scpd_xml();
-    REQUIRE(xml.find("<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">")
-            != std::string_view::npos);
-    REQUIRE(xml.find("<name>GetSearchCapabilities</name>") != std::string_view::npos);
-    REQUIRE(xml.find("<name>GetSortCapabilities</name>") != std::string_view::npos);
-    REQUIRE(xml.find("<name>GetSystemUpdateID</name>") != std::string_view::npos);
-    REQUIRE(xml.find("<name>Browse</name>") != std::string_view::npos);
+    REQUIRE(xml.contains("<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">"));
+    REQUIRE(xml.contains("<name>GetSearchCapabilities</name>"));
+    REQUIRE(xml.contains("<name>GetSortCapabilities</name>"));
+    REQUIRE(xml.contains("<name>GetSystemUpdateID</name>"));
+    REQUIRE(xml.contains("<name>Browse</name>"));
 }
 
 TEST_CASE("ContentDirectory SCPD declares Browse arguments", "[upnp][scpd]") {
     auto const xml = content_directory_scpd_xml();
-    for (auto* name : {"ObjectID",
-                       "BrowseFlag",
-                       "Filter",
-                       "StartingIndex",
-                       "RequestedCount",
-                       "SortCriteria",
-                       "Result",
-                       "NumberReturned",
-                       "TotalMatches",
-                       "UpdateID"}) {
+    for (const auto* name : {"ObjectID",
+                             "BrowseFlag",
+                             "Filter",
+                             "StartingIndex",
+                             "RequestedCount",
+                             "SortCriteria",
+                             "Result",
+                             "NumberReturned",
+                             "TotalMatches",
+                             "UpdateID"}) {
         std::string const tag = std::string("<name>") + name + "</name>";
-        REQUIRE(xml.find(tag) != std::string_view::npos);
+        REQUIRE(xml.contains(tag));
     }
 }
 
 TEST_CASE("ConnectionManager SCPD declares the three required actions", "[upnp][scpd]") {
     auto const xml = connection_manager_scpd_xml();
-    REQUIRE(xml.find("<name>GetProtocolInfo</name>") != std::string_view::npos);
-    REQUIRE(xml.find("<name>GetCurrentConnectionIDs</name>") != std::string_view::npos);
-    REQUIRE(xml.find("<name>GetCurrentConnectionInfo</name>") != std::string_view::npos);
+    REQUIRE(xml.contains("<name>GetProtocolInfo</name>"));
+    REQUIRE(xml.contains("<name>GetCurrentConnectionIDs</name>"));
+    REQUIRE(xml.contains("<name>GetCurrentConnectionInfo</name>"));
 }
 
 TEST_CASE("ConnectionManager SCPD declares Source/Sink protocol-info vars", "[upnp][scpd]") {
     auto const xml = connection_manager_scpd_xml();
-    REQUIRE(xml.find("<name>SourceProtocolInfo</name>") != std::string_view::npos);
-    REQUIRE(xml.find("<name>SinkProtocolInfo</name>") != std::string_view::npos);
+    REQUIRE(xml.contains("<name>SourceProtocolInfo</name>"));
+    REQUIRE(xml.contains("<name>SinkProtocolInfo</name>"));
 }

@@ -22,6 +22,6 @@ TEST_CASE("format_didl_duration_ms negative becomes zero", "[media][duration]") 
 }
 
 TEST_CASE("format_didl_duration matches the ms helper", "[media][duration]") {
-    auto const d = std::chrono::milliseconds{4 * 60 * 1000 + 10 * 1000 + 500};
+    auto const d = std::chrono::milliseconds{(4 * 60 * 1000) + (10 * 1000) + 500};
     REQUIRE(format_didl_duration(d) == "0:04:10.500");
 }

@@ -9,9 +9,7 @@
 
 using sonarium::catalog::Album;
 using sonarium::catalog::Artist;
-using sonarium::catalog::PageRequest;
 using sonarium::catalog::Playlist;
-using sonarium::catalog::PlaylistItem;
 using sonarium::catalog::SqliteRepository;
 using sonarium::catalog::StorageAsset;
 using sonarium::catalog::Track;

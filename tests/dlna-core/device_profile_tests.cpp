@@ -68,7 +68,7 @@ TEST_CASE("Samsung TV matches by user-agent or X-AV-Client-Info header", "[dlna]
     REQUIRE(reg.match(RequestHeaders{"SEC_HHP_TV/1.0", {}}).name == "Samsung TV");
 
     std::array<std::pair<std::string_view, std::string_view>, 1> extras{{
-        {"X-AV-Client-Info", "av: 5.0; cn: \"Samsung\"; mn: \"DMP\"; mv: \"2.0\";"},
+        {"X-AV-Client-Info", R"(av: 5.0; cn: "Samsung"; mn: "DMP"; mv: "2.0";)"},
     }};
     REQUIRE(reg.match(RequestHeaders{"unknown-ua", extras}).name == "Samsung TV");
 }

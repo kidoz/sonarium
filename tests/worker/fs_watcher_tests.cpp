@@ -48,7 +48,7 @@ TEST_CASE("polling watcher reports change after the slice elapses", "[worker][wa
     REQUIRE(w);
     REQUIRE(w->backend_name() == "polling");
 
-    std::atomic_bool stop{false};
+    std::atomic_bool const stop{false};
     auto const t0 = std::chrono::steady_clock::now();
     bool const changed = w->wait_for_change(std::chrono::seconds{2}, stop);
     auto const elapsed = std::chrono::steady_clock::now() - t0;
@@ -87,7 +87,7 @@ TEST_CASE("native watcher detects a new file", "[worker][watcher][live]") {
     auto w = std::move(*w_or);
     REQUIRE((w->backend_name() == "inotify" || w->backend_name() == "fsevents"));
 
-    std::atomic_bool stop{false};
+    std::atomic_bool const stop{false};
     std::thread writer{[&root]() {
         // Brief pause so the watcher has a chance to enter wait_for_change
         // before we write — otherwise on macOS FSEvents the historical event

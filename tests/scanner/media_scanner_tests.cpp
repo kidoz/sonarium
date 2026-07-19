@@ -47,7 +47,7 @@ private:
 
 TEST_CASE("scanner walks <artist>/<album>/<NN - title>.<ext> into the writer",
           "[scanner][writer]") {
-    TempDir tmp;
+    TempDir const tmp;
     tmp.write_file("Pink Floyd/The Wall/01 - Another Brick.mp3", "FAKE_MP3_BYTES");
     tmp.write_file("Pink Floyd/The Wall/02 - Hey You.flac", "FAKE_FLAC_BYTES");
     tmp.write_file("Pink Floyd/Wish You Were Here/01 - Shine On.mp3", "FAKE_MP3_BYTES");
@@ -110,7 +110,7 @@ TEST_CASE("scanner walks <artist>/<album>/<NN - title>.<ext> into the writer",
 }
 
 TEST_CASE("scanner is idempotent — second run upserts the same rows", "[scanner][writer]") {
-    TempDir tmp;
+    TempDir const tmp;
     tmp.write_file("Artist/Album/01 - One.mp3", "X");
     tmp.write_file("Artist/Album/02 - Two.mp3", "XY");
 

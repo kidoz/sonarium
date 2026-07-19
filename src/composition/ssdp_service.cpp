@@ -103,7 +103,7 @@ bool SsdpResponseBudget::allow(std::size_t count,
 
 std::vector<OutboundMessage> responses_for_msearch(SsdpConfig const& config,
                                                    sonarium::upnp::ssdp::MSearch const& msearch,
-                                                   std::string requester_address,
+                                                   const std::string& requester_address,
                                                    std::uint16_t requester_port) {
     auto const adverts = sonarium::upnp::ssdp::adverts_for_search_target(config.udn, msearch.st);
     std::vector<OutboundMessage> out;

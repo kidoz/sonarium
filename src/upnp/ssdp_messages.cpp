@@ -185,7 +185,7 @@ std::string build_msearch_response(AdvertFields const& fields) {
 }
 
 std::string build_notify(NotifyKind kind, AdvertFields const& fields) {
-    auto const nts = (kind == NotifyKind::alive) ? "ssdp:alive" : "ssdp:byebye";
+    const auto* const nts = (kind == NotifyKind::alive) ? "ssdp:alive" : "ssdp:byebye";
     bool const include_location = (kind == NotifyKind::alive);
     bool const include_cache = (kind == NotifyKind::alive);
     return build_advert("NOTIFY * HTTP/1.1",

@@ -202,7 +202,7 @@ SqliteRepository::open(std::filesystem::path const& db_path) {
     sqlite3* db = nullptr;
     constexpr int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
     if (sqlite3_open_v2(db_path.string().c_str(), &db, flags, nullptr) != SQLITE_OK) {
-        std::string err = (db != nullptr) ? sqlite3_errmsg(db) : "out of memory";
+        std::string const err = (db != nullptr) ? sqlite3_errmsg(db) : "out of memory";
         sqlite3_close(db);
         return std::unexpected("sqlite open failed: " + err);
     }
@@ -215,7 +215,7 @@ SqliteRepository::open(std::filesystem::path const& db_path) {
                                "PRAGMA synchronous=NORMAL"}) {
         char* errmsg = nullptr;
         if (sqlite3_exec(db, pragma, nullptr, nullptr, &errmsg) != SQLITE_OK) {
-            std::string err = (errmsg != nullptr) ? errmsg : "unknown error";
+            std::string const err = (errmsg != nullptr) ? errmsg : "unknown error";
             sqlite3_free(errmsg);
             sqlite3_close(db);
             return std::unexpected("sqlite pragma failed: " + err);
@@ -231,7 +231,7 @@ std::expected<void, std::string> SqliteRepository::ensure_schema() {
     auto const run = [this](std::string_view sql) -> std::expected<void, std::string> {
         char* errmsg = nullptr;
         if (sqlite3_exec(db_, std::string{sql}.c_str(), nullptr, nullptr, &errmsg) != SQLITE_OK) {
-            std::string err = (errmsg != nullptr) ? errmsg : "unknown error";
+            std::string const err = (errmsg != nullptr) ? errmsg : "unknown error";
             sqlite3_free(errmsg);
             return std::unexpected("ensure_schema failed: " + err);
         }

@@ -8,7 +8,6 @@ using sonarium::media::AudioContainer;
 using sonarium::media::default_mime_for;
 using sonarium::media::dlna_org_pn_for;
 using sonarium::media::mime_from_extension;
-using sonarium::media::RenditionMime;
 
 TEST_CASE("default_mime_for known codecs", "[media][mime]") {
     REQUIRE(default_mime_for({AudioCodec::mp3, AudioContainer::mp3}) == "audio/mpeg");
@@ -41,5 +40,5 @@ TEST_CASE("dlna_org_pn_for mp3 and lpcm", "[media][mime]") {
 TEST_CASE("ascii_lowercase preserves non-ascii bytes verbatim", "[media][mime]") {
     REQUIRE(ascii_lowercase("Hello WORLD") == "hello world");
     REQUIRE(ascii_lowercase("ABCXYZ") == "abcxyz");
-    REQUIRE(ascii_lowercase("") == "");
+    REQUIRE(ascii_lowercase("").empty());
 }

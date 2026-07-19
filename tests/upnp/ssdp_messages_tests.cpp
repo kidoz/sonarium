@@ -89,16 +89,14 @@ TEST_CASE("M-SEARCH response carries CACHE-CONTROL/LOCATION/ST/USN/SERVER", "[up
 
     auto const xml = build_msearch_response(f);
     REQUIRE(xml.starts_with("HTTP/1.1 200 OK\r\n"));
-    REQUIRE(xml.find("CACHE-CONTROL: max-age=1800\r\n") != std::string::npos);
-    REQUIRE(xml.find("LOCATION: http://192.168.1.10:8200/description.xml\r\n")
-            != std::string::npos);
-    REQUIRE(xml.find("ST: urn:schemas-upnp-org:device:MediaServer:1\r\n") != std::string::npos);
-    REQUIRE(xml.find("USN: uuid:abc::urn:schemas-upnp-org:device:MediaServer:1\r\n")
-            != std::string::npos);
-    REQUIRE(xml.find("SERVER: Sonarium/0.1 UPnP/1.0 sonarium-dlna/0.1\r\n") != std::string::npos);
-    REQUIRE(xml.find("EXT: \r\n") != std::string::npos);
+    REQUIRE(xml.contains("CACHE-CONTROL: max-age=1800\r\n"));
+    REQUIRE(xml.contains("LOCATION: http://192.168.1.10:8200/description.xml\r\n"));
+    REQUIRE(xml.contains("ST: urn:schemas-upnp-org:device:MediaServer:1\r\n"));
+    REQUIRE(xml.contains("USN: uuid:abc::urn:schemas-upnp-org:device:MediaServer:1\r\n"));
+    REQUIRE(xml.contains("SERVER: Sonarium/0.1 UPnP/1.0 sonarium-dlna/0.1\r\n"));
+    REQUIRE(xml.contains("EXT: \r\n"));
     REQUIRE(xml.ends_with("\r\n\r\n"));
-    REQUIRE(xml.find("LOCATION: 0.0.0.0") == std::string::npos);
+    REQUIRE(!xml.contains("LOCATION: 0.0.0.0"));
 }
 
 TEST_CASE("NOTIFY ssdp:alive carries CACHE-CONTROL/LOCATION/NT/NTS/USN", "[upnp][ssdp]") {
@@ -110,13 +108,12 @@ TEST_CASE("NOTIFY ssdp:alive carries CACHE-CONTROL/LOCATION/NT/NTS/USN", "[upnp]
 
     auto const xml = build_notify(NotifyKind::alive, f);
     REQUIRE(xml.starts_with("NOTIFY * HTTP/1.1\r\n"));
-    REQUIRE(xml.find("HOST: 239.255.255.250:1900\r\n") != std::string::npos);
-    REQUIRE(xml.find("CACHE-CONTROL: max-age=1800\r\n") != std::string::npos);
-    REQUIRE(xml.find("LOCATION: http://192.168.1.10:8200/description.xml\r\n")
-            != std::string::npos);
-    REQUIRE(xml.find("NT: upnp:rootdevice\r\n") != std::string::npos);
-    REQUIRE(xml.find("NTS: ssdp:alive\r\n") != std::string::npos);
-    REQUIRE(xml.find("USN: uuid:abc::upnp:rootdevice\r\n") != std::string::npos);
+    REQUIRE(xml.contains("HOST: 239.255.255.250:1900\r\n"));
+    REQUIRE(xml.contains("CACHE-CONTROL: max-age=1800\r\n"));
+    REQUIRE(xml.contains("LOCATION: http://192.168.1.10:8200/description.xml\r\n"));
+    REQUIRE(xml.contains("NT: upnp:rootdevice\r\n"));
+    REQUIRE(xml.contains("NTS: ssdp:alive\r\n"));
+    REQUIRE(xml.contains("USN: uuid:abc::upnp:rootdevice\r\n"));
 }
 
 TEST_CASE("NOTIFY ssdp:byebye omits CACHE-CONTROL and LOCATION", "[upnp][ssdp]") {
@@ -127,9 +124,9 @@ TEST_CASE("NOTIFY ssdp:byebye omits CACHE-CONTROL and LOCATION", "[upnp][ssdp]")
 
     auto const xml = build_notify(NotifyKind::byebye, f);
     REQUIRE(xml.starts_with("NOTIFY * HTTP/1.1\r\n"));
-    REQUIRE(xml.find("NTS: ssdp:byebye\r\n") != std::string::npos);
-    REQUIRE(xml.find("CACHE-CONTROL") == std::string::npos);
-    REQUIRE(xml.find("LOCATION") == std::string::npos);
+    REQUIRE(xml.contains("NTS: ssdp:byebye\r\n"));
+    REQUIRE(!xml.contains("CACHE-CONTROL"));
+    REQUIRE(!xml.contains("LOCATION"));
 }
 
 TEST_CASE("required_search_targets covers root, uuid, MediaServer, both services", "[upnp][ssdp]") {

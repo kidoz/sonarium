@@ -13,7 +13,7 @@ ExternalDepsSmoke external_deps_smoke() noexcept {
     out.logspine_info_level = static_cast<std::uint8_t>(::logspine::level::info);
     out.logspine_info_label = ::logspine::to_string(::logspine::level::info);
     out.ctorwire_scope_constructible = []() noexcept {
-        ::ctorwire::scope s;
+        ::ctorwire::scope const s;
         (void)s;
         return true;
     }();

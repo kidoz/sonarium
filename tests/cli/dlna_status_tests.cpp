@@ -83,11 +83,11 @@ TEST_CASE("parse_description_xml errors when UDN is missing", "[cli][dlna]") {
 
 TEST_CASE("build_browse_request embeds object id and counts", "[cli][dlna]") {
     auto const body = sonarium::cli::build_browse_request("0", 0, 50);
-    REQUIRE(body.find("<ObjectID>0</ObjectID>") != std::string::npos);
-    REQUIRE(body.find("<StartingIndex>0</StartingIndex>") != std::string::npos);
-    REQUIRE(body.find("<RequestedCount>50</RequestedCount>") != std::string::npos);
-    REQUIRE(body.find("<BrowseFlag>BrowseDirectChildren</BrowseFlag>") != std::string::npos);
-    REQUIRE(body.find("urn:schemas-upnp-org:service:ContentDirectory:1") != std::string::npos);
+    REQUIRE(body.contains("<ObjectID>0</ObjectID>"));
+    REQUIRE(body.contains("<StartingIndex>0</StartingIndex>"));
+    REQUIRE(body.contains("<RequestedCount>50</RequestedCount>"));
+    REQUIRE(body.contains("<BrowseFlag>BrowseDirectChildren</BrowseFlag>"));
+    REQUIRE(body.contains("urn:schemas-upnp-org:service:ContentDirectory:1"));
 }
 
 TEST_CASE("parse_browse_response pulls counts and update id", "[cli][dlna]") {
@@ -101,5 +101,5 @@ TEST_CASE("parse_browse_response pulls counts and update id", "[cli][dlna]") {
 TEST_CASE("parse_browse_response surfaces SOAP faults", "[cli][dlna]") {
     auto const r = sonarium::cli::parse_browse_response(soap_fault);
     REQUIRE_FALSE(r.has_value());
-    REQUIRE(r.error().find("UPnPError") != std::string::npos);
+    REQUIRE(r.error().contains("UPnPError"));
 }

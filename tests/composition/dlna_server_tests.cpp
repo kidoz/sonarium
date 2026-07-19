@@ -130,73 +130,68 @@ TEST_CASE("Injector resolves a non-null DlnaServer", "[composition]") {
 TEST_CASE("description.xml carries the configured friendly name", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const xml = server->description_xml();
-    REQUIRE(xml.find("<friendlyName>Sonarium</friendlyName>") != std::string::npos);
-    REQUIRE(xml.find("<UDN>uuid:abcdef01-2345-6789-abcd-ef0123456789</UDN>") != std::string::npos);
-    REQUIRE(xml.find("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>")
-            != std::string::npos);
+    REQUIRE(xml.contains("<friendlyName>Sonarium</friendlyName>"));
+    REQUIRE(xml.contains("<UDN>uuid:abcdef01-2345-6789-abcd-ef0123456789</UDN>"));
+    REQUIRE(xml.contains("<deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>"));
 }
 
 TEST_CASE("SCPD getters return the canonical UPnP service descriptors", "[composition]") {
     using sonarium::composition::DlnaServer;
-    REQUIRE(DlnaServer::content_directory_scpd().find("<name>Browse</name>")
-            != std::string_view::npos);
-    REQUIRE(DlnaServer::connection_manager_scpd().find("<name>GetProtocolInfo</name>")
-            != std::string_view::npos);
+    REQUIRE(DlnaServer::content_directory_scpd().contains("<name>Browse</name>"));
+    REQUIRE(DlnaServer::connection_manager_scpd().contains("<name>GetProtocolInfo</name>"));
 }
 
 TEST_CASE("Browse(0) round-trips through the SOAP pipeline", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const response = server->dispatch_soap(browse_root_request, "VLC/3.0");
 
-    REQUIRE(response.find("<u:BrowseResponse xmlns:u=\""
-                          "urn:schemas-upnp-org:service:ContentDirectory:1\">")
-            != std::string::npos);
-    REQUIRE(response.find("<NumberReturned>2</NumberReturned>") != std::string::npos);
+    REQUIRE(response.contains("<u:BrowseResponse xmlns:u=\""
+                              "urn:schemas-upnp-org:service:ContentDirectory:1\">"));
+    REQUIRE(response.contains("<NumberReturned>2</NumberReturned>"));
     // DIDL-Lite is XML-escaped inside <Result> per UPnP convention.
-    REQUIRE(response.find("&lt;DIDL-Lite") != std::string::npos);
-    REQUIRE(response.find("Music") != std::string::npos);
-    REQUIRE(response.find("Playlists") != std::string::npos);
+    REQUIRE(response.contains("&lt;DIDL-Lite"));
+    REQUIRE(response.contains("Music"));
+    REQUIRE(response.contains("Playlists"));
 }
 
 TEST_CASE("Browse(album:1) picks profile-appropriate resource URL", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const response = server->dispatch_soap(browse_album_request, "VLC/3.0");
 
-    REQUIRE(response.find("<NumberReturned>1</NumberReturned>") != std::string::npos);
-    REQUIRE(response.find("Gimme Shelter") != std::string::npos);
-    REQUIRE(response.find("http://192.168.1.10:8200/media/renditions/r1") != std::string::npos);
+    REQUIRE(response.contains("<NumberReturned>1</NumberReturned>"));
+    REQUIRE(response.contains("Gimme Shelter"));
+    REQUIRE(response.contains("http://192.168.1.10:8200/media/renditions/r1"));
 }
 
 TEST_CASE("GetProtocolInfo returns a Source CSV with audio MIMEs", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const response = server->dispatch_soap(get_protocol_info_request, "VLC/3.0");
 
-    REQUIRE(response.find("<u:GetProtocolInfoResponse xmlns:u=\""
-                          "urn:schemas-upnp-org:service:ConnectionManager:1\">")
-            != std::string::npos);
-    REQUIRE(response.find("audio/mpeg") != std::string::npos);
-    REQUIRE(response.find("audio/flac") != std::string::npos); // VLC profile exposes FLAC
-    REQUIRE(response.find("<Sink></Sink>") != std::string::npos);
+    REQUIRE(response.contains("<u:GetProtocolInfoResponse xmlns:u=\""
+                              "urn:schemas-upnp-org:service:ConnectionManager:1\">"));
+    REQUIRE(response.contains("audio/mpeg"));
+    REQUIRE(response.contains("audio/flac")); // VLC profile exposes FLAC
+    REQUIRE(response.contains("<Sink></Sink>"));
 }
 
 TEST_CASE("GetSystemUpdateID returns the catalog counter", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const response = server->dispatch_soap(get_system_update_id_request, "VLC/3.0");
-    REQUIRE(response.find("<Id>0</Id>") != std::string::npos);
+    REQUIRE(response.contains("<Id>0</Id>"));
 }
 
 TEST_CASE("Unknown service URN yields a SOAP fault", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const response = server->dispatch_soap(unknown_service_request, "VLC/3.0");
-    REQUIRE(response.find("<faultcode>s:Client</faultcode>") != std::string::npos);
-    REQUIRE(response.find("<errorCode>401</errorCode>") != std::string::npos);
+    REQUIRE(response.contains("<faultcode>s:Client</faultcode>"));
+    REQUIRE(response.contains("<errorCode>401</errorCode>"));
 }
 
 TEST_CASE("Malformed SOAP body yields a fault", "[composition]") {
     auto server = make_dlna_server(sample_repo(), sample_config());
     auto const response = server->dispatch_soap("not a soap envelope", "VLC/3.0");
-    REQUIRE(response.find("<faultcode>s:Client</faultcode>") != std::string::npos);
-    REQUIRE(response.find("<errorCode>402</errorCode>") != std::string::npos);
+    REQUIRE(response.contains("<faultcode>s:Client</faultcode>"));
+    REQUIRE(response.contains("<errorCode>402</errorCode>"));
 }
 
 TEST_CASE("Custom profile registry is honored for resource selection", "[composition]") {
@@ -213,6 +208,6 @@ TEST_CASE("Custom profile registry is honored for resource selection", "[composi
         sample_repo(), profiles, sonarium::core::make_null_logger(), sample_config());
     auto const response = server->dispatch_soap(browse_album_request, "anything");
 
-    REQUIRE(response.find("Gimme Shelter") != std::string::npos);
-    REQUIRE(response.find("DLNA.ORG_PN=") == std::string::npos);
+    REQUIRE(response.contains("Gimme Shelter"));
+    REQUIRE(!response.contains("DLNA.ORG_PN="));
 }

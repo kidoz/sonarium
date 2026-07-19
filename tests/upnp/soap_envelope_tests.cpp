@@ -39,7 +39,7 @@ TEST_CASE("Browse request parses cleanly", "[upnp][soap_envelope]") {
     REQUIRE(r->arg_or("Filter", "") == "*");
     REQUIRE(r->arg_or("StartingIndex", "") == "0");
     REQUIRE(r->arg_or("RequestedCount", "") == "200");
-    REQUIRE(r->arg_or("SortCriteria", "FALLBACK") == "");
+    REQUIRE(r->arg_or("SortCriteria", "FALLBACK").empty());
 }
 
 TEST_CASE("Parser tolerates lowercase Envelope/Body and BOM", "[upnp][soap_envelope]") {
@@ -118,30 +118,27 @@ TEST_CASE("Response envelope is well-formed", "[upnp][soap_envelope]") {
                                           {"UpdateID", "1"}});
 
     REQUIRE(xml.starts_with(R"(<?xml version="1.0" encoding="utf-8"?>)"));
-    REQUIRE(xml.find("<u:BrowseResponse xmlns:u=\""
-                     "urn:schemas-upnp-org:service:ContentDirectory:1\">")
-            != std::string::npos);
+    REQUIRE(xml.contains("<u:BrowseResponse xmlns:u=\""
+                         "urn:schemas-upnp-org:service:ContentDirectory:1\">"));
     // DIDL inside Result must be XML-escaped (UPnP convention: Result is a string).
-    REQUIRE(xml.find("<Result>&lt;DIDL-Lite/&gt;</Result>") != std::string::npos);
-    REQUIRE(xml.find("<NumberReturned>0</NumberReturned>") != std::string::npos);
+    REQUIRE(xml.contains("<Result>&lt;DIDL-Lite/&gt;</Result>"));
+    REQUIRE(xml.contains("<NumberReturned>0</NumberReturned>"));
     REQUIRE(xml.ends_with("</u:BrowseResponse></s:Body></s:Envelope>"));
 }
 
 TEST_CASE("Fault envelope carries UPnP error code and description", "[upnp][soap_envelope]") {
     auto const xml = build_soap_fault(UpnpErrorCode::no_such_object);
-    REQUIRE(xml.find("<faultcode>s:Client</faultcode>") != std::string::npos);
-    REQUIRE(xml.find("<faultstring>UPnPError</faultstring>") != std::string::npos);
-    REQUIRE(xml.find(R"(<UPnPError xmlns="urn:schemas-upnp-org:control-1-0">)")
-            != std::string::npos);
-    REQUIRE(xml.find("<errorCode>701</errorCode>") != std::string::npos);
-    REQUIRE(xml.find("<errorDescription>No Such Object</errorDescription>") != std::string::npos);
+    REQUIRE(xml.contains("<faultcode>s:Client</faultcode>"));
+    REQUIRE(xml.contains("<faultstring>UPnPError</faultstring>"));
+    REQUIRE(xml.contains(R"(<UPnPError xmlns="urn:schemas-upnp-org:control-1-0">)"));
+    REQUIRE(xml.contains("<errorCode>701</errorCode>"));
+    REQUIRE(xml.contains("<errorDescription>No Such Object</errorDescription>"));
 }
 
 TEST_CASE("Fault envelope honors custom description", "[upnp][soap_envelope]") {
     auto const xml = build_soap_fault(UpnpErrorCode::action_failed, "container is empty");
-    REQUIRE(xml.find("<errorDescription>container is empty</errorDescription>")
-            != std::string::npos);
-    REQUIRE(xml.find("<errorCode>501</errorCode>") != std::string::npos);
+    REQUIRE(xml.contains("<errorDescription>container is empty</errorDescription>"));
+    REQUIRE(xml.contains("<errorCode>501</errorCode>"));
 }
 
 TEST_CASE("Round trip: parse then build", "[upnp][soap_envelope]") {

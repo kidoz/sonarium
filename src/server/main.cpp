@@ -113,7 +113,7 @@ void handle_shutdown_signal(int /*signum*/) {
 } // namespace
 
 int main() {
-    std::setvbuf(stdout, nullptr, _IOLBF, 0);
+    (void)std::setvbuf(stdout, nullptr, _IOLBF, 0);
 
     auto const v = sonarium::core::current_version();
     // Malformed values are collected rather than silently defaulted: WARN in
@@ -222,8 +222,8 @@ int main() {
 
     ::atria::Application app;
     g_shutdown_app.store(&app);
-    std::signal(SIGINT, handle_shutdown_signal);
-    std::signal(SIGTERM, handle_shutdown_signal);
+    (void)std::signal(SIGINT, handle_shutdown_signal);
+    (void)std::signal(SIGTERM, handle_shutdown_signal);
     app.use(::atria::middleware::error_handler());
     app.use(::atria::middleware::request_logger());
     sonarium::server::register_hls_routes(

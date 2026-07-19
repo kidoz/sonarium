@@ -66,8 +66,8 @@ struct App {
     std::unique_ptr<::atria::Application> app;
 };
 
-[[nodiscard]] App make_app(std::shared_ptr<InMemoryRepository> repo,
-                           std::shared_ptr<MediaTokenSigner> signer,
+[[nodiscard]] App make_app(const std::shared_ptr<InMemoryRepository>& repo,
+                           const std::shared_ptr<MediaTokenSigner>& signer,
                            std::filesystem::path media_root = {},
                            std::filesystem::path cache_root = {}) {
     if (cache_root.empty()) {
@@ -121,8 +121,8 @@ TEST_CASE("GET /version identifies the HLS server", "[server][hls_routes]") {
     auto req = make_get("/version");
     auto const res = ctx.app->dispatch(req);
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("server") != std::string::npos);
-    REQUIRE(res.body().find(self_base) != std::string::npos);
+    REQUIRE(res.body().contains("server"));
+    REQUIRE(res.body().contains(self_base));
 }
 
 TEST_CASE("master playlist lists variant index URLs", "[server][hls_routes]") {
@@ -130,8 +130,7 @@ TEST_CASE("master playlist lists variant index URLs", "[server][hls_routes]") {
     auto req = make_get("/hls/tracks/t1/master.m3u8");
     auto const res = ctx.app->dispatch(req);
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find(std::string{self_base} + "/hls/renditions/r1/index.m3u8")
-            != std::string::npos);
+    REQUIRE(res.body().contains(std::string{self_base} + "/hls/renditions/r1/index.m3u8"));
 }
 
 TEST_CASE("master playlist for unknown track is 404", "[server][hls_routes]") {
@@ -146,8 +145,8 @@ TEST_CASE("index playlist falls back to single-segment when no source on disk",
     auto req = make_get("/hls/renditions/r1/index.m3u8");
     auto const res = ctx.app->dispatch(req);
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find(std::string{media_base} + "/media/renditions/r1") != std::string::npos);
-    REQUIRE(res.body().find("#EXT-X-ENDLIST") != std::string::npos);
+    REQUIRE(res.body().contains(std::string{media_base} + "/media/renditions/r1"));
+    REQUIRE(res.body().contains("#EXT-X-ENDLIST"));
 }
 
 TEST_CASE("every HLS route rejects untokened requests when signing is enabled",
@@ -173,7 +172,7 @@ TEST_CASE("master accepts a track-bound token and mints tokened variant URLs",
     auto req = make_get("/hls/tracks/t1/master.m3u8", token_query(signer->sign("t1")));
     auto const res = ctx.app->dispatch(req);
     REQUIRE(res.status() == ::atria::Status::Ok);
-    REQUIRE(res.body().find("/hls/renditions/r1/index.m3u8?expires=") != std::string::npos);
+    REQUIRE(res.body().contains("/hls/renditions/r1/index.m3u8?expires="));
 }
 
 TEST_CASE("a token bound to a different resource is rejected", "[server][hls_routes]") {
@@ -324,5 +323,5 @@ TEST_CASE("readiness reflects catalog availability", "[server][hls_routes]") {
     auto down_ready = make_get("/readyz");
     auto const res = down_app->dispatch(down_ready);
     REQUIRE(static_cast<std::uint16_t>(res.status()) == 503);
-    REQUIRE(res.body().find("catalog unavailable") != std::string::npos);
+    REQUIRE(res.body().contains("catalog unavailable"));
 }

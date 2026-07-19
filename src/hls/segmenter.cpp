@@ -42,7 +42,7 @@ namespace {
     if (name.size() != prefix.size() + digits + suffix.size()) {
         return false;
     }
-    if (name.substr(0, prefix.size()) != prefix) {
+    if (!name.starts_with(prefix)) {
         return false;
     }
     if (name.substr(prefix.size() + digits) != suffix) {
@@ -66,17 +66,13 @@ namespace {
     if (id.ends_with(".part")) {
         return false; // reserved for in-progress segmenter output dirs
     }
-    for (char const c : id) {
-        bool const ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-                        || c == '-' || c == '_' || c == ':' || c == '.';
-        if (!ok) {
-            return false;
-        }
-        if (c == '.' && (id.find("..") != std::string_view::npos)) {
-            return false;
-        }
+    if (id.contains("..")) {
+        return false;
     }
-    return true;
+    return std::ranges::all_of(id, [](char const c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+               || c == '-' || c == '_' || c == ':' || c == '.';
+    });
 }
 
 [[nodiscard]] std::expected<int, std::string> spawn_and_wait(std::vector<std::string> const& argv) {
@@ -125,7 +121,7 @@ namespace {
     }
     std::string const contents{std::istreambuf_iterator<char>{in},
                                std::istreambuf_iterator<char>{}};
-    return contents.find("#EXT-X-ENDLIST") != std::string::npos;
+    return contents.contains("#EXT-X-ENDLIST");
 }
 
 [[nodiscard]] std::uint64_t dir_size_bytes(std::filesystem::path const& dir) {
@@ -373,7 +369,7 @@ void Segmenter::evict_over_cap(std::string_view keep_rendition_id) {
         return;
     }
 
-    std::sort(entries.begin(), entries.end(), [](CacheEntry const& a, CacheEntry const& b) {
+    std::ranges::sort(entries, [](CacheEntry const& a, CacheEntry const& b) {
         return a.last_used < b.last_used;
     });
 
