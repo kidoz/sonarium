@@ -1,4 +1,6 @@
-#include "worker/fs_watcher.hpp"
+#include <poll.h>
+#include <sys/inotify.h>
+#include <unistd.h>
 
 #include <array>
 #include <cerrno>
@@ -6,20 +8,18 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
-#include <poll.h>
 #include <string>
-#include <sys/inotify.h>
-#include <unistd.h>
 #include <unordered_map>
 #include <vector>
+
+#include "worker/fs_watcher.hpp"
 
 namespace sonarium::worker {
 
 namespace {
 
-constexpr std::uint32_t watch_mask = IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO
-                                     | IN_MODIFY | IN_CLOSE_WRITE | IN_DELETE_SELF
-                                     | IN_MOVE_SELF;
+constexpr std::uint32_t watch_mask = IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_MODIFY
+                                     | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF;
 
 [[nodiscard]] std::string strerror_safe(int err) {
     std::array<char, 256> buf{};
@@ -55,8 +55,7 @@ public:
         }
     }
 
-    bool wait_for_change(std::chrono::milliseconds timeout,
-                          std::atomic_bool const& stop) override {
+    bool wait_for_change(std::chrono::milliseconds timeout, std::atomic_bool const& stop) override {
         constexpr int slice_ms = 200;
         std::chrono::milliseconds elapsed{0};
         while (elapsed < timeout) {
@@ -64,8 +63,8 @@ public:
                 return false;
             }
             pollfd pfd{.fd = fd_, .events = POLLIN, .revents = 0};
-            int const remaining = std::min<int>(slice_ms, static_cast<int>(
-                                                              (timeout - elapsed).count()));
+            int const remaining =
+                std::min<int>(slice_ms, static_cast<int>((timeout - elapsed).count()));
             int const rc = ::poll(&pfd, 1, remaining);
             if (rc < 0) {
                 if (errno == EINTR) {
@@ -102,8 +101,8 @@ private:
             std::size_t offset = 0;
             while (offset + sizeof(inotify_event) <= static_cast<std::size_t>(n)) {
                 auto const* event = reinterpret_cast<inotify_event const*>(buf.data() + offset);
-                if ((event->mask & IN_ISDIR) != 0
-                    && (event->mask & (IN_CREATE | IN_MOVED_TO)) != 0 && event->len > 0) {
+                if ((event->mask & IN_ISDIR) != 0 && (event->mask & (IN_CREATE | IN_MOVED_TO)) != 0
+                    && event->len > 0) {
                     if (auto const it = watches_.find(event->wd); it != watches_.end()) {
                         // A moved-in directory may already contain subdirs.
                         watch_tree(it->second / event->name);
@@ -117,8 +116,9 @@ private:
     void watch_tree(std::filesystem::path const& dir) {
         add_watch(dir);
         std::error_code ec;
-        for (auto it = std::filesystem::recursive_directory_iterator{
-                 dir, std::filesystem::directory_options::skip_permission_denied, ec};
+        for (auto it =
+                 std::filesystem::recursive_directory_iterator{
+                     dir, std::filesystem::directory_options::skip_permission_denied, ec};
              !ec && it != std::filesystem::recursive_directory_iterator{};
              it.increment(ec)) {
             if (it->is_directory(ec)) {
@@ -156,8 +156,9 @@ make_native_fs_watcher(std::filesystem::path const& root) {
         }
     };
     add(root);
-    for (auto it = std::filesystem::recursive_directory_iterator{
-             root, std::filesystem::directory_options::skip_permission_denied, ec};
+    for (auto it =
+             std::filesystem::recursive_directory_iterator{
+                 root, std::filesystem::directory_options::skip_permission_denied, ec};
          !ec && it != std::filesystem::recursive_directory_iterator{};
          it.increment(ec)) {
         if (it->is_directory(ec)) {

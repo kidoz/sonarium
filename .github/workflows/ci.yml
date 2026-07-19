@@ -21,15 +21,14 @@ on:
 
 # Linux jobs use LLVM 19 from apt.llvm.org: Ubuntu 24.04's clang 18 cannot
 # use libstdc++'s std::expected (needs __cpp_concepts >= 202002L, clang 19+).
-env:
-  CC: clang-19
-  CXX: clang++-19
+# The env is per-job so the macOS runner keeps its Apple clang.
 
 jobs:
   gate:
     name: gate (format + lint + tests, Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env: {CC: clang-19, CXX: clang++-19}
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
@@ -61,6 +60,7 @@ jobs:
     name: ASan + UBSan
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env: {CC: clang-19, CXX: clang++-19}
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
@@ -69,7 +69,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             meson ninja-build ffmpeg libpq-dev libsqlite3-dev
       - name: Configure
-        run: meson setup buildSan -Db_sanitize=address,undefined -Dbuildtype=debugoptimized
+        run: meson setup buildSan -Db_sanitize=address,undefined -Dbuildtype=debugoptimized -Ddefault_library=static
       - name: Tests
         run: |
           meson test -C buildSan --timeout-multiplier 4 --print-errorlogs \
@@ -81,6 +81,7 @@ jobs:
     name: TSan (threaded suites)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env: {CC: clang-19, CXX: clang++-19}
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
@@ -89,7 +90,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             meson ninja-build ffmpeg libpq-dev libsqlite3-dev
       - name: Configure
-        run: meson setup buildTsan -Db_sanitize=thread -Dbuildtype=debugoptimized
+        run: meson setup buildTsan -Db_sanitize=thread -Dbuildtype=debugoptimized -Ddefault_library=static
       - name: Tests
         run: |
           meson test -C buildTsan --timeout-multiplier 4 --print-errorlogs \
@@ -99,6 +100,7 @@ jobs:
     name: catalog suite vs live Postgres
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env: {CC: clang-19, CXX: clang++-19}
     services:
       postgres:
         image: postgres:17-alpine
